@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import ts from 'typescript';
+import assert from 'node:assert/strict';
+const code=ts.transpileModule(fs.readFileSync('app/physics.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;
+const {body,collide,integrate}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+let a=body(0,0),b=body(0,4);a.vz=20;const impact=collide(a,b);assert(impact>0);assert(b.vz>0);assert(a.vz<20);assert(Math.abs(a.vz+b.vz-20)<1e-8);assert(b.z-a.z>=4.4);
+a=body(0,0);b=body(1.2,4);a.vz=20;collide(a,b);assert(Math.abs(a.spin)+Math.abs(b.spin)>.1);
+a=body(0,0);b=body(20,20);a.vz=20;assert.equal(collide(a,b),0);assert.equal(a.vz,20);
+a=body(0,0);b=body(0,4);a.vz=-10;assert.equal(collide(a,b),0);assert.equal(a.vz,-10);
+a=body(0,0);a.vx=30;for(let i=0;i<3000;i++)integrate(a,1/120,(x,z)=>Math.abs(x)>10||Math.abs(z)>10);assert(Math.abs(a.x)<=10);assert(Number.isFinite(a.vx));
+a=body(0,0);b=body(0,4);a.vz=30;for(let i=0;i<1000;i++){integrate(a,1/120,()=>false);integrate(b,1/120,()=>false);collide(a,b)}assert(Number.isFinite(a.x+b.z+a.spin));
+console.log('6 physics checks passed: momentum, separation, glancing spin, non-contact, separating contact, stable wall response.');
