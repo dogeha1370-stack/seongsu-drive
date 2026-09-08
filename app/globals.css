@@ -4,3 +4,5 @@
 .attack{position:absolute;right:35px;bottom:245px;background:#d97743e8;font-weight:bold;min-height:48px}.attack:disabled{opacity:.45;cursor:default}@media(max-width:760px){.attack{right:18px;bottom:248px;padding:10px}.attack kbd{display:none}}
 
 .world canvas{touch-action:none}
+
+.health{position:absolute;left:32px;bottom:280px;width:186px;padding:12px;background:#162329e8;border-radius:6px;font-size:13px}.health span{display:block;margin-bottom:8px}.health b{float:right;font-size:12px}.health progress{display:block;width:100%;height:9px;accent-color:#8ee28d}.hurt{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 100px #ed493c99}@media(max-width:760px){.health{left:18px;bottom:260px;width:155px}}
