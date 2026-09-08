@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import ts from 'typescript';
+import assert from 'node:assert/strict';
+const code=ts.transpileModule(fs.readFileSync('app/pedestrians.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ES2022,target:ts.ScriptTarget.ES2022}}).outputText;
+const {person,hitPerson,vehiclePerson,stepPerson}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
+const car=(angle=0)=>({x:0,z:0,angle,vx:0,vz:0,spin:0,mass:1100,stun:0});
+let p=person(1,0,0),other=person(2,5,0);assert(hitPerson(p,1,0,5.5));assert(p.vx>0&&p.stun>0);assert.equal(other.vx,0);assert(!hitPerson(p,1,0,5.5));
+for(let i=0;i<600;i++)stepPerson(p,1/120,()=>false);assert.equal(p.stun,0);assert.equal(p.down,0);assert(p.lean<.01);assert(p.x>0);
+p=person(0,0,2.5);let c=car();c.vz=20;assert(vehiclePerson(c,p)>=6);assert(p.vz>0&&p.down>0);assert(c.vz<20);
+p=person(0,2.5,0);c=car(Math.PI/2);c.vx=20;assert(vehiclePerson(c,p)>6);assert(p.vx>0);
+p=person(0,0,2.5);c=car();assert.equal(vehiclePerson(c,p),0);assert.equal(p.down,0);
+p=person(0,20,20);c=car();c.vz=30;assert.equal(vehiclePerson(c,p),0);
+p=person(0,0,2.5);c=car();c.vz=-20;assert.equal(vehiclePerson(c,p),0);
+p=person(0,0,0);hitPerson(p,1,0,22);for(let i=0;i<2000;i++)stepPerson(p,1/120,(x,z)=>Math.abs(x)>3||Math.abs(z)>3);assert(Math.abs(p.x)<=3);assert(Number.isFinite(p.x+p.z+p.vx));
+p=person(0,0,2.5);c=car();c.vz=20;vehiclePerson(c,p);for(let i=0;i<1000;i++)stepPerson(p,1/120,()=>false);assert.equal(p.down,0);assert(p.lean<.01);
+console.log('Pedestrian checks passed: independent state, punch, cooldown, recovery, frontal and rotated vehicle impacts, stationary/receding/non-contact cars, wall bounds.');
