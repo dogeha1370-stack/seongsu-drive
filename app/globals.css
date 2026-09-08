@@ -6,3 +6,5 @@
 .world canvas{touch-action:none}
 
 .health{position:absolute;left:32px;bottom:280px;width:186px;padding:12px;background:#162329e8;border-radius:6px;font-size:13px}.health span{display:block;margin-bottom:8px}.health b{float:right;font-size:12px}.health progress{display:block;width:100%;height:9px;accent-color:#8ee28d}.hurt{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 100px #ed493c99}@media(max-width:760px){.health{left:18px;bottom:260px;width:155px}}
+
+.vehicle-health{position:absolute;right:35px;bottom:310px;width:186px;padding:12px;background:#162329e8;border-radius:6px;font-size:13px}.vehicle-health span{display:block;margin-bottom:8px}.vehicle-health b{float:right;font-size:12px}.vehicle-health progress{display:block;width:100%;height:9px;accent-color:#83c9ec}@media(max-width:760px){.vehicle-health{right:18px;bottom:310px;width:155px}}
