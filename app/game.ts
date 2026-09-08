@@ -1,7 +1,12 @@
 import { FEMALE_RESIDENT_IDS, residentName, numberChance } from './social';
-import type { Peer } from './multiplayer';
+import type { Peer, PresenceState } from './multiplayer';
+import { createMotorcycle } from './motorcycle';
+import { newBikeMotion, stepBike } from './bike-motion';
+import { SKIN_TONES, HAIR_COLORS, avatarSeed } from './avatar';
+import { sampleMotion, type MotionSample } from './net-motion';
 import { createHuman, type HumanRig } from './human';
 import * as T from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { body, collide, integrate, type Body } from './physics';
 import { headingFromDirection } from './controls';
 import {
@@ -57,6 +62,12 @@ export type Panel =
   | 'help'
   | null;
 export type Hud = {
+  building?: {
+    floor: number;
+    moving: boolean;
+    nearLift: boolean;
+    nearDelivery: boolean;
+  } | null;
   social: {
     id: number;
     name: string;
@@ -92,6 +103,11 @@ export type Hud = {
   error: string;
 };
 export type GameApi = {
+  presence: () => PresenceState;
+  onPeerAttack: (callback: (id: string, kind: 'gun' | 'punch') => void) => void;
+  receiveDamage: (amount: number) => void;
+  typing: (value: boolean) => void;
+  elevator: () => void;
   askNumber: () => void;
   setPeers: (peers: Peer[]) => void;
   jump: () => void;
@@ -134,8 +150,8 @@ export function createGame(
       life.hp = hp;
       if (!life.inside) {
         const pos = activePosition();
-        life.playerX = pos.x;
-        life.playerZ = pos.z;
+        life.playerX = buildingFloor !== null ? 100 : pos.x;
+        life.playerZ = buildingFloor !== null ? 56 : pos.z;
       }
       life.bikeX = bike.position.x;
       life.bikeZ = bike.position.z;
@@ -145,6 +161,13 @@ export function createGame(
       saveStatus = '저장 실패 · 브라우저 저장 공간을 확인하세요.';
     }
   };
+  let buildingFloor: number | null = null;
+  let liftRemaining = 0,
+    liftFrom = 0,
+    liftTo = 0;
+  let typing = false,
+    zoom = 1;
+  const bikeMotion = newBikeMotion();
   const scene = new T.Scene();
   scene.background = new T.Color('#b6c7cb');
   scene.fog = new T.Fog('#b6c7cb', 90, 260);
@@ -194,6 +217,7 @@ export function createGame(
     m.castShadow = true;
     m.receiveShadow = true;
     parent.add(m);
+    m.userData.staticWorld = parent === scene;
     return m;
   }
   function sign(
@@ -262,7 +286,7 @@ export function createGame(
     for (const z of [-96, -36, 36, 96]) {
       const w = 30,
         d = 34,
-        h = 8 + (n % 4) * 3;
+        h = x === 100 && z === 36 ? 8 : 8 + (n % 4) * 3;
       box(w + 5, 0.3, d + 5, '#b6b4a5', x, 0.12, z);
       box(
         w,
@@ -299,6 +323,13 @@ export function createGame(
       );
       n++;
     }
+  const oliveSign = sign('OLIVE YOUNG', 27, -40, 5.8, 53.6);
+  (oliveSign.material as T.MeshStandardMaterial).color.set('#d1ed57');
+  box(29, 1.2, 0.35, '#b7d631', -40, 3.7, 53.6);
+  sign('뷰티 · 생활용품 · 배달 픽업', 22, -40, 2.2, 53.85);
+  sign('SEONGSU MOTORS', 27, -100, 5.8, -18.5);
+  sign('BIKE SHOP · BUY & RIDE', 24, -100, 3.7, -18.4);
+  sign('서울숲 빌딩 · 1F / 2F', 27, 100, 5.8, 53.7);
   // Branded shop facade. Logo texture is the official SVG served locally.
   const mcdFacade = new T.Group();
   mcdFacade.name = 'mcdonalds';
@@ -545,30 +576,118 @@ export function createGame(
     box(0.06, 0.75, 0.12, '#566a64', x, 2.45, -3.85, room);
   box(0.15, 2, 0.15, '#686e62', 4, 1, 0.1, room);
   box(0.9, 0.12, 0.2, '#686e62', 3.7, 2, 0.1, room);
+  const office = new T.Group();
+  office.name = 'office-interior';
+  scene.add(office);
+  const officeFloors: T.Group[] = [];
+  for (let floor = 0; floor < 2; floor++) {
+    const level = new T.Group();
+    level.position.set(400, floor * 5, 0);
+    office.add(level);
+    officeFloors.push(level);
+    box(12, 0.15, 9, '#c7cdd0', 0, -0.12, 0, level);
+    box(12, 3.4, 0.15, '#b8c8c5', 0, 1.6, -4.5, level);
+    box(0.15, 3.4, 9, '#a4b8b8', -6, 1.6, 0, level);
+    for (const x of [-2, 2]) box(0.15, 3.4, 2, '#899b9d', x, 1.6, -3.5, level);
+    box(3.4, 0.15, 2.8, '#5e6a70', 0, 3.25, -3.1, level);
+    box(1.3, 2.6, 0.13, '#60766f', 4, 1.25, -4.35, level);
+    const label = sign(
+      floor ? '201 · 배달 수령' : 'LOBBY · 1F',
+      4,
+      404,
+      2.9 + floor * 5,
+      -4.22,
+    );
+    level.attach(label);
+    const number = sign(floor ? '2F' : '1F', 1.3, 400, 2.8 + floor * 5, -4.2);
+    level.attach(number);
+    if (floor) {
+      const person = createHuman('#cbb697', SKIN_TONES[3]);
+      person.root.position.set(4, 0, 1);
+      level.add(person.root);
+    }
+  }
+  const lift = new T.Group();
+  lift.position.set(400, 0, -3.1);
+  office.add(lift);
+  box(3.3, 0.2, 2.4, '#555f67', 0, -0.03, 0, lift);
+  box(3.3, 3, 0.1, '#a3adb4', 0, 1.5, -1.2, lift);
+  const liftDoors = [
+    box(1.6, 2.8, 0.1, '#8e999e', -0.82, 1.4, 1.16, lift),
+    box(1.6, 2.8, 0.1, '#8e999e', 0.82, 1.4, 1.16, lift),
+  ];
+  const officeLight = new T.PointLight('#f0f8ff', 95, 24, 2);
+  officeLight.position.set(400, 8, 0);
+  scene.add(officeLight);
+  function enterOffice() {
+    if (life.inside || driving || riding || hp <= 0) return;
+    buildingFloor = 1;
+    panel = null;
+    clear();
+    player.position.set(400, 0, 2.5);
+    yaw = orbit = 0;
+    camera.position.set(405, 7, 8);
+    lastHud = 0;
+  }
+  function operateElevator() {
+    if (paused || hp <= 0) return;
+    if (buildingFloor === null) {
+      if (nearby === 'office') enterOffice();
+      return;
+    }
+    if (
+      liftRemaining ||
+      Math.hypot(player.position.x - 400, player.position.z + 3.1) > 1.55
+    )
+      return;
+    liftFrom = (buildingFloor - 1) * 5;
+    liftTo = buildingFloor === 1 ? 5 : 0;
+    liftRemaining = 2.8;
+    clear();
+    panel = null;
+    player.position.set(400, liftFrom, -3.1);
+  }
+  function updateOffice(dt: number) {
+    office.visible = officeLight.visible = buildingFloor !== null;
+    officeFloors.forEach((g, i) => (g.visible = buildingFloor === i + 1));
+    if (buildingFloor === null) return;
+    if (liftRemaining > 0 && !paused) {
+      liftRemaining = Math.max(0, liftRemaining - dt);
+      const t = 1 - liftRemaining / 2.8;
+      const ease = t * t * (3 - 2 * t);
+      lift.position.y = liftFrom + (liftTo - liftFrom) * ease;
+      player.position.set(400, lift.position.y, -3.1);
+      if (!liftRemaining) {
+        buildingFloor = liftTo === 5 ? 2 : 1;
+        lastHud = 0;
+        say(buildingFloor + '층에 도착했습니다.');
+      }
+    } else lift.position.y = (buildingFloor - 1) * 5;
+    liftDoors[0].position.x = liftRemaining ? -0.82 : -2.3;
+    liftDoors[1].position.x = liftRemaining ? 0.82 : 2.3;
+    if (buildingFloor === 1 && player.position.z > 3.8 && !liftRemaining) {
+      buildingFloor = null;
+      player.position.set(100, 0, 60);
+      dismissedPlace = 'office';
+      panel = null;
+      clear();
+    }
+  }
   const roomLight = new T.PointLight('#fff0c9', 55, 18, 2);
   roomLight.position.set(300, 4, 1);
   scene.add(roomLight);
-  function scooter(color: string, x: number, z: number) {
-    const g = new T.Group();
-    box(0.65, 0.7, 1.5, color, 0, 0.7, 0, g);
-    box(0.6, 0.15, 0.85, '#263438', 0, 1.13, -0.22, g);
-    box(0.08, 0.6, 0.08, '#b1bfbc', 0, 1.2, 0.65, g);
-    box(0.85, 0.08, 0.12, '#273333', 0, 1.53, 0.65, g);
-    for (const zz of [-0.7, 0.7]) {
-      const wheel = new T.Mesh(
-        new T.CylinderGeometry(0.36, 0.36, 0.16, 12),
-        mat('#243033'),
-      );
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(0, 0.38, zz);
-      g.add(wheel);
-    }
-    box(0.4, 0.2, 0.07, '#fff0b0', 0, 1.2, 0.78, g);
+  function scooter(color: string, x: number, z: number, tier = 0) {
+    const g = createMotorcycle(color, tier);
     g.position.set(x, 0, z);
     scene.add(g);
     return g;
   }
-  const bike = scooter('#84b9ae', life.bikeX, life.bikeZ);
+  const bike = scooter(
+    '#84b9ae',
+    life.bikeX,
+    life.bikeZ,
+    Math.max(0, life.bikeTier),
+  );
   bike.name = 'player-bike';
   const deliveryBox = box(0.85, 0.7, 0.8, '#e1e581', 0, 1.55, -0.65, bike);
   const placeMarkers = PLACES.map((p) => {
@@ -851,8 +970,8 @@ export function createGame(
       female
         ? ['#b597bb', '#c1aaa1', '#95aaba'][i % 3]
         : ['#61787f', '#c8b594', '#914f40'][i % 3],
-      ['#cda17e', '#b38260', '#e3bc9d'][i % 3],
-      i % 2 ? '#302923' : '#504033',
+      SKIN_TONES[i % SKIN_TONES.length],
+      HAIR_COLORS[Math.floor(i / 3) % HAIR_COLORS.length],
       female,
     );
     const g = rig.root;
@@ -972,15 +1091,17 @@ export function createGame(
       (b) => Math.abs(x - b.x) < b.w / 2 + r && Math.abs(z - b.z) < b.d / 2 + r,
     );
   const playerBlocked = (x: number, z: number, r: number) =>
-    life.inside
-      ? Math.abs(x - 300) > 4.2 - r ||
-        (Math.abs(z) > 3.7 - r &&
-          !(Math.abs(x - 300) < 0.7 && z > 0 && z < 5)) ||
-        (x < 298.9 && z < 1.4 && z > -2.8)
-      : blocked(x, z, r) ||
-        obstacleBounds().some(
-          (b) => circleVehicleCorrection(x, z, r, b) !== null,
-        );
+    buildingFloor !== null
+      ? Math.abs(x - 400) > 6 - r || Math.abs(z) > 4.5 - r
+      : life.inside
+        ? Math.abs(x - 300) > 4.2 - r ||
+          (Math.abs(z) > 3.7 - r &&
+            !(Math.abs(x - 300) < 0.7 && z > 0 && z < 5)) ||
+          (x < 298.9 && z < 1.4 && z > -2.8)
+        : blocked(x, z, r) ||
+          obstacleBounds().some(
+            (b) => circleVehicleCorrection(x, z, r, b) !== null,
+          );
   let armed = false,
     jumpVelocity = 0,
     shotCooldown = 0,
@@ -1206,6 +1327,7 @@ export function createGame(
       labelText: string;
       target: Peer;
       vehicle: T.Group | null;
+      samples: MotionSample[];
     }
   >();
   function nameLabel(text: string) {
@@ -1253,18 +1375,43 @@ export function createGame(
     materials.forEach((m) => m.dispose());
     guests.delete(id);
   }
+  let peerAttack: (id: string, kind: 'gun' | 'punch') => void = () => {};
+  const currentScene = () =>
+    buildingFloor !== null
+      ? 'office:' + buildingFloor
+      : life.inside
+        ? 'home'
+        : 'outdoors';
   function setPeers(peers: Peer[]) {
     const ids = new Set(peers.map((p) => p.id));
     for (const id of guests.keys()) if (!ids.has(id)) removeGuest(id);
     for (const p of peers) {
       let g = guests.get(p.id);
-      const text = p.name + (p.emote ? ' · ' + p.emote : '');
+      const text =
+        p.name +
+        ((p.hp ?? 100) <= 0
+          ? ' · 쓰러짐'
+          : ' · HP ' + Math.round(p.hp ?? 100)) +
+        (p.emote ? ' · ' + p.emote : '');
       if (!g) {
-        const rig = createHuman('#829dd3');
+        const seed = avatarSeed(p.id);
+        const rig = createHuman(
+          ['#829dd3', '#cc9977', '#80aaa1'][seed % 3],
+          SKIN_TONES[seed % 6],
+          HAIR_COLORS[Math.floor(seed / 6) % 6],
+          seed % 3 === 0,
+        );
         rig.root.name = 'guest-' + p.id;
         rig.root.position.set(p.x, 0, p.z);
         const label = nameLabel(text);
-        g = { rig, label, labelText: text, target: p, vehicle: null };
+        g = {
+          rig,
+          label,
+          labelText: text,
+          target: p,
+          vehicle: null,
+          samples: [{ ...p, at: performance.now() }],
+        };
         guests.set(p.id, g);
         scene.add(rig.root, label);
       }
@@ -1285,31 +1432,50 @@ export function createGame(
               ? scooter('#829dd3', p.x, p.z)
               : null;
       }
+      if (p.at === undefined || p.at !== g.target.at) {
+        if (
+          p.scene !== g.target.scene ||
+          Math.hypot(p.x - g.target.x, p.z - g.target.z) > 25
+        )
+          g.samples = [];
+        g.samples.push({ ...p, at: performance.now() });
+        if (g.samples.length > 8) g.samples.shift();
+      }
       g.target = p;
     }
   }
-  function updateGuests(dt: number) {
+  function updateGuests(_dt: number) {
     for (const g of guests.values()) {
       const p = g.target,
-        visible = !life.inside && p.scene === 'outdoors';
+        visible = !life.inside && p.scene === currentScene();
       g.rig.root.visible = visible && p.mode !== 'car';
       g.label.visible = visible;
       if (g.vehicle) g.vehicle.visible = visible;
       const root = g.rig.root;
-      root.position.lerp(
-        new T.Vector3(p.x, p.mode === 'bike' ? 0.35 : 0, p.z),
-        1 - Math.exp(-dt * 9),
+      const motion = sampleMotion(g.samples, performance.now());
+      root.position.set(
+        buildingFloor !== null ? 400 + (motion.x - 100) : motion.x,
+        buildingFloor !== null ? (buildingFloor - 1) * 5 : 0,
+        buildingFloor !== null ? motion.z - 56 : motion.z,
       );
-      const delta = Math.atan2(
-        Math.sin(p.heading - root.rotation.y),
-        Math.cos(p.heading - root.rotation.y),
+      if (p.mode === 'bike') root.position.y += 0.22;
+      root.rotation.set((p.hp ?? 100) <= 0 ? 1.35 : 0, motion.heading, 0);
+      g.rig.pose(
+        elapsed,
+        p.mode === 'walk' ? motion.speed / 3.6 : 0,
+        0,
+        (p.hp ?? 100) <= 0,
       );
-      root.rotation.y += delta * (1 - Math.exp(-dt * 10));
-      g.rig.pose(elapsed, p.mode === 'walk' ? p.speed / 3.6 : 0, 0);
-      g.label.position.set(root.position.x, 3.1, root.position.z);
+      if (p.mode === 'bike') g.rig.ride(0);
+      g.label.position.set(
+        root.position.x,
+        root.position.y + 3.1,
+        root.position.z,
+      );
       if (g.vehicle) {
         g.vehicle.position.set(root.position.x, 0, root.position.z);
         g.vehicle.rotation.y = root.rotation.y;
+        g.vehicle.userData.animateBike?.((elapsed * motion.speed) / 3.6, 0, 0);
       }
     }
   }
@@ -1322,7 +1488,8 @@ export function createGame(
   }
   let dismissedPlace: PlaceId | null = null,
     previousNearby: PlaceId | null = null;
-  const movementAllowed = () => !panel || panel === 'place';
+  const movementAllowed = () =>
+    liftRemaining <= 0 && !typing && (!panel || panel === 'place');
   function open(next: Panel) {
     if ((paused || hp <= 0) && next) return;
     if (panel === 'place' && next === null) dismissedPlace = nearby;
@@ -1371,10 +1538,31 @@ export function createGame(
     hp = life.hp;
     if (action === 'talk') panel = 'dialogue';
     if (oldTier !== life.bikeTier) {
+      for (const child of bike.children.slice())
+        if (child !== deliveryBox) {
+          bike.remove(child);
+          child.traverse((o) => {
+            if (o instanceof T.Mesh) {
+              o.geometry.dispose();
+              (o.material as T.Material).dispose();
+            }
+          });
+        }
+      const model = createMotorcycle(
+        ['#81b6a8', '#e5cd83', '#abc8dc', '#de684d', '#8295eb'][
+          Math.max(0, life.bikeTier)
+        ],
+        Math.max(0, life.bikeTier),
+      );
+      for (const child of model.children.slice()) bike.add(child);
+      bike.userData.animateBike = model.userData.animateBike;
+      Object.assign(bikeMotion, newBikeMotion());
       bike.position.set(-97, 0, -13);
       riding = false;
     }
     if (action === 'recover') {
+      buildingFloor = null;
+      liftRemaining = 0;
       paused = false;
       player.rotation.x = 0;
       enterHome();
@@ -1452,6 +1640,7 @@ export function createGame(
       paused ||
       !movementAllowed() ||
       life.inside ||
+      buildingFloor !== null ||
       hp <= 0 ||
       (!riding && player.position.y > 0.05)
     )
@@ -1465,6 +1654,10 @@ export function createGame(
       for (const dx of [1.5, -1.5])
         if (!blocked(pos.x + dx, pos.z, 0.5)) {
           riding = false;
+          yaw = bikeMotion.heading + Math.PI;
+          bikeMotion.velocity = 0;
+          bike.rotation.z = 0;
+          player.rotation.z = 0;
           player.position.x += dx;
           break;
         }
@@ -1485,6 +1678,7 @@ export function createGame(
       abandonedBikes.splice(abandonedBikes.indexOf(abandoned), 1);
       clear();
       riding = true;
+      Object.assign(bikeMotion, newBikeMotion(bike.rotation.y));
       player.position.copy(bike.position);
       armed = false;
       gun.visible = false;
@@ -1502,6 +1696,7 @@ export function createGame(
       }
       clear();
       riding = true;
+      Object.assign(bikeMotion, newBikeMotion(bike.rotation.y));
       player.position.copy(bike.position);
       armed = false;
       gun.visible = false;
@@ -1514,7 +1709,7 @@ export function createGame(
   let numberRequest: { id: number; remaining: number; chance: number } | null =
     null;
   function nearbyWoman() {
-    return !life.inside && !driving && !riding
+    return !life.inside && buildingFloor === null && !driving && !riding
       ? people
           .filter(
             (p) =>
@@ -1820,6 +2015,7 @@ export function createGame(
     );
   }
   function jump() {
+    if (buildingFloor !== null || typing) return;
     if (
       !paused &&
       movementAllowed() &&
@@ -1850,6 +2046,7 @@ export function createGame(
     noticeTime = 2;
   }
   function shoot() {
+    if (buildingFloor !== null) return;
     if (
       paused ||
       !movementAllowed() ||
@@ -1914,6 +2111,21 @@ export function createGame(
         aimPoint.copy(hits[0].point);
       }
     }
+    for (const g of guests.values())
+      if (g.target.scene === currentScene() && (g.target.hp ?? 100) > 0) {
+        const p = g.rig.root.position;
+        const bounds = new T.Box3(
+          new T.Vector3(p.x - 0.45, p.y, p.z - 0.45),
+          new T.Vector3(p.x + 0.45, p.y + 2.2, p.z + 0.45),
+        );
+        if (
+          sight.ray.intersectBox(bounds, point) &&
+          point.distanceTo(sight.ray.origin) < aimDistance
+        ) {
+          aimDistance = point.distanceTo(sight.ray.origin);
+          aimPoint.copy(point);
+        }
+      }
     const aimSpread =
       (aiming ? 0.004 : 0.035) +
       speed * 0.006 +
@@ -1985,6 +2197,25 @@ export function createGame(
         victim = null;
       }
     }
+    let peerVictim: string | null = null;
+    for (const [id, g] of guests)
+      if (g.target.scene === currentScene() && (g.target.hp ?? 100) > 0) {
+        const p = g.rig.root.position;
+        const bounds = new T.Box3(
+          new T.Vector3(p.x - 0.45, p.y, p.z - 0.45),
+          new T.Vector3(p.x + 0.45, p.y + 2.2, p.z + 0.45),
+        );
+        if (
+          ray.intersectBox(bounds, hit) &&
+          origin.distanceTo(hit) < distance
+        ) {
+          distance = origin.distanceTo(hit);
+          peerVictim = id;
+          victim = null;
+          vehicleTarget = null;
+        }
+      }
+    if (peerVictim) peerAttack(peerVictim, 'gun');
     if (victim) {
       damagePerson(victim.state, 35);
       hitPerson(victim.state, direction.x, direction.z, 3);
@@ -2050,6 +2281,7 @@ export function createGame(
     return false;
   }
   function attack() {
+    if (buildingFloor !== null) return;
     if (armed) {
       shoot();
       return;
@@ -2088,6 +2320,29 @@ export function createGame(
       }
     }
     if (!hit) {
+      const target = [...guests.entries()]
+        .filter(
+          ([, g]) =>
+            g.target.scene === currentScene() && (g.target.hp ?? 100) > 0,
+        )
+        .map(([id, g]) => ({
+          id,
+          p: g.rig.root.position,
+          delta: g.rig.root.position.clone().sub(player.position),
+        }))
+        .filter(
+          (g) =>
+            g.delta.length() < 2.7 &&
+            g.delta.clone().normalize().dot(dir) > 0.25 &&
+            lineClear(player.position, g.p),
+        )
+        .sort((a, b) => a.delta.lengthSq() - b.delta.lengthSq())[0];
+      if (target) {
+        peerAttack(target.id, 'punch');
+        hit = true;
+      }
+    }
+    if (!hit) {
       const candidates = people
         .map((p) => ({
           p,
@@ -2117,6 +2372,22 @@ export function createGame(
     }
   }
   function interact() {
+    if (buildingFloor !== null) {
+      if (paused || typing || hp <= 0 || liftRemaining) return;
+      if (Math.hypot(player.position.x - 400, player.position.z + 3.1) < 1.55) {
+        operateElevator();
+        return;
+      }
+      if (
+        buildingFloor === 2 &&
+        Math.hypot(player.position.x - 404, player.position.z - 1) < 2
+      ) {
+        const message = deliver(life, 'office', 2);
+        say(message || '201호 · 주문하신 상품을 이곳에 전달합니다.');
+        if (message) save();
+      }
+      return;
+    }
     if (
       hp <= 0 ||
       paused ||
@@ -2185,6 +2456,14 @@ export function createGame(
       return;
     }
     if (!driving && nearby) {
+      if (
+        nearby === 'office' &&
+        life.order?.floor === 2 &&
+        life.order.stage === 'dropoff'
+      ) {
+        enterOffice();
+        return;
+      }
       const message = deliver(life, nearby);
       if (message) {
         say(message);
@@ -2234,6 +2513,9 @@ export function createGame(
     reloadTime = 0;
   }
   function reset() {
+    buildingFloor = null;
+    liftRemaining = 0;
+    Object.assign(bikeMotion, newBikeMotion());
     for (const b of abandonedBikes) scene.remove(b.mesh);
     abandonedBikes.length = 0;
     for (const m of cashMeshes.values()) scene.remove(m);
@@ -2576,7 +2858,8 @@ export function createGame(
         p.spin *= Math.exp(-3 * dt);
       } else if (v === controlled && driving) {
         const forward = p.vx * fx + p.vz * fz;
-        const thrust = f * (forward * f < 0 ? 27 : 17);
+        const thrust =
+          Math.max(-1, Math.min(1, f)) * (forward * f < 0 ? 11 : 6.5);
         p.vx += fx * thrust * dt;
         p.vz += fz * thrust * dt;
         const lateral = p.vx * fz - p.vz * fx,
@@ -2587,13 +2870,19 @@ export function createGame(
           p.angle +=
             turn * dt * 1.7 * T.MathUtils.clamp(forward / 18, -1.2, 1.2);
         if (keys[' ']) {
-          p.vx *= Math.exp(-7 * dt);
-          p.vz *= Math.exp(-7 * dt);
+          const brakeSpeed = Math.hypot(p.vx, p.vz);
+          const braking = Math.max(
+            0,
+            1 - (11 * dt) / Math.max(0.001, brakeSpeed),
+          );
+          p.vx *= braking;
+          p.vz *= braking;
         }
         const vel = Math.hypot(p.vx, p.vz);
-        if (vel > 32) {
-          p.vx *= 32 / vel;
-          p.vz *= 32 / vel;
+        const limit = forward < 0 ? 6 : 32;
+        if (vel > limit) {
+          p.vx *= limit / vel;
+          p.vz *= limit / vel;
         }
       } else if (v.route.length && !v.driverOut && p.stun <= 0) {
         let target = v.route[v.waypoint];
@@ -2812,6 +3101,14 @@ export function createGame(
           : 0,
         p.state.hp === 0 || p.state.down > 0 || p.state.stun > 0,
       );
+      if (p.vehicle) {
+        p.rig.ride(0);
+        p.vehicle.userData.animateBike?.(
+          elapsed * Math.hypot(p.state.vx, p.state.vz),
+          0,
+          0,
+        );
+      }
       p.mesh.position.set(
         p.state.x,
         Math.sin(p.state.lean) * 0.3 + (p.vehicle && p.wait <= 0 ? 0.35 : 0),
@@ -2872,6 +3169,7 @@ export function createGame(
     const k = e.key.toLowerCase();
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k))
       e.preventDefault();
+    if (e.type === 'keyup') keys[k] = false;
     if (movementAllowed()) keys[k] = e.type === 'keydown';
     if (e.type === 'keydown' && !e.repeat) {
       if (k === 'e') interact();
@@ -2982,6 +3280,12 @@ export function createGame(
   renderer.domElement.addEventListener('pointercancel', up);
   renderer.domElement.addEventListener('lostpointercapture', lostCapture);
   renderer.domElement.addEventListener('contextmenu', contextMenu);
+  const wheel = (e: WheelEvent) => {
+    if (!movementAllowed() || paused) return;
+    e.preventDefault();
+    zoom = T.MathUtils.clamp(zoom + e.deltaY * 0.001, 0.42, 1.85);
+  };
+  renderer.domElement.addEventListener('wheel', wheel, { passive: false });
   const resize = () => {
     renderer.setSize(host.clientWidth, host.clientHeight);
     camera.aspect = host.clientWidth / host.clientHeight;
@@ -3038,10 +3342,14 @@ export function createGame(
       if (seen) lastKnown.copy(pos);
     }
     const posNow = activePosition();
-    nearby = life.inside
-      ? 'home'
-      : PLACES.find((p) => Math.hypot(p.x - posNow.x, p.z - posNow.z) < 4.8)
-          ?.id || null;
+    updateOffice(dt);
+    nearby =
+      buildingFloor !== null
+        ? null
+        : life.inside
+          ? 'home'
+          : PLACES.find((p) => Math.hypot(p.x - posNow.x, p.z - posNow.z) < 4.8)
+              ?.id || null;
     if (!paused) updateSocial(dt);
     if (nearby !== previousNearby) {
       dismissedPlace = null;
@@ -3106,10 +3414,81 @@ export function createGame(
         physicsStep(1 / 120, f, turn);
         accumulator -= 1 / 120;
       }
-      if (!driving) {
+      if (!driving && riding) {
+        const maximum =
+          life.fuel > 0 && life.bikeHp > 0
+            ? BIKES[life.bikeTier].speed + (life.bikeTune ? 3 : 0)
+            : 0;
+        const delta = stepBike(bikeMotion, f, turn, !!keys[' '], maximum, dt);
+        const before = player.position.clone();
+        let impact = false;
+        const steps = Math.max(
+          1,
+          Math.ceil(Math.hypot(delta.x, delta.z) / 0.22),
+        );
+        for (let i = 0; i < steps; i++) {
+          const nx = player.position.x + delta.x / steps,
+            nz = player.position.z + delta.z / steps;
+          if (playerBlocked(nx, nz, 0.8)) {
+            impact = true;
+            break;
+          }
+          player.position.x = nx;
+          player.position.z = nz;
+        }
+        if (impact) {
+          const force = Math.abs(bikeMotion.velocity);
+          bikeMotion.velocity *= 0.12;
+          life.bikeHp = Math.max(0, life.bikeHp - force * 0.4);
+          if (force > 7 && hurtTimer <= 0) {
+            hp = Math.max(0, hp - Math.round(force));
+            hurtTimer = 1;
+            shake = 0.15;
+          }
+        }
+        speed = Math.abs(bikeMotion.velocity);
+        player.position.y = 0.22;
+        player.rotation.y = bikeMotion.heading;
+        player.rotation.z = bikeMotion.lean;
+        bike.position.set(player.position.x, 0, player.position.z);
+        bike.rotation.y = bikeMotion.heading;
+        bike.userData.animateBike?.(
+          bikeMotion.travel,
+          bikeMotion.steering,
+          bikeMotion.lean,
+        );
+        for (const p of people)
+          if (
+            p.active &&
+            p.state.hp > 0 &&
+            p.state.cooldown === 0 &&
+            Math.hypot(
+              p.state.x - player.position.x,
+              p.state.z - player.position.z,
+            ) < 1 &&
+            speed > 3
+          ) {
+            hitPerson(
+              p.state,
+              Math.sin(bikeMotion.heading),
+              Math.cos(bikeMotion.heading),
+              6,
+            );
+            damagePerson(p.state, Math.min(45, speed * 2));
+            crime(1);
+            bikeMotion.velocity *= 0.7;
+          }
+        if (before.distanceTo(player.position) < 0.001 && speed < 0.1)
+          bikeMotion.velocity = 0;
+      }
+      if (!driving && !riding) {
         jumpVelocity -= 18 * dt;
-        player.position.y = Math.max(0, player.position.y + jumpVelocity * dt);
-        if (player.position.y === 0) jumpVelocity = 0;
+        const groundY = buildingFloor !== null ? (buildingFloor - 1) * 5 : 0;
+        player.position.y = Math.max(
+          groundY,
+          player.position.y + jumpVelocity * dt,
+        );
+        if (player.position.y === groundY) jumpVelocity = 0;
         const a = yaw + orbit;
         const dx = -Math.sin(a) * f - Math.cos(a) * turn,
           dz = -Math.cos(a) * f + Math.sin(a) * turn,
@@ -3177,7 +3556,8 @@ export function createGame(
       noticeTime = Math.max(0, noticeTime - dt);
       const punch =
         attackTime > 0 ? Math.sin((1 - attackTime / 0.28) * Math.PI) : 0;
-      playerRig.pose(elapsed, driving ? 0 : speed, punch);
+      playerRig.pose(elapsed, driving || riding ? 0 : speed, punch);
+      if (riding) playerRig.ride(bikeMotion.lean);
       shotCooldown = Math.max(0, shotCooldown - dt);
       shotTime = Math.max(0, shotTime - dt);
       recoil = Math.max(0, recoil - dt * 0.055);
@@ -3205,7 +3585,7 @@ export function createGame(
         playerRig.arms[1].rotation.x = -Math.PI / 2;
         playerRig.elbows[1].rotation.x = 0;
       }
-      if (player.position.y > 0.05) {
+      if (!riding && player.position.y > 0.05) {
         playerRig.knees[0].rotation.x = 0.65;
         playerRig.knees[1].rotation.x = 0.65;
       }
@@ -3228,7 +3608,12 @@ export function createGame(
         beam.position.set(target.x, 8, target.z);
       }
       ring.scale.setScalar(1 + Math.sin(elapsed * 3) * 0.06);
-      const a = (driving ? yaw + Math.PI : yaw) + orbit,
+      const a =
+          (driving
+            ? yaw + Math.PI
+            : riding
+              ? bikeMotion.heading + Math.PI
+              : yaw) + orbit,
         forward = new T.Vector3(
           -Math.sin(a) * Math.cos(pitch),
           -Math.sin(pitch),
@@ -3249,12 +3634,16 @@ export function createGame(
             pos.x +
               Math.sin(a) *
                 Math.cos(pitch) *
-                (life.inside ? 10 : driving ? 16 : 13),
-            1.8 + Math.sin(pitch) * (life.inside ? 10 : driving ? 16 : 13),
+                (life.inside ? 10 : driving ? 16 : 13) *
+                zoom,
+            1.8 +
+              player.position.y +
+              Math.sin(pitch) * (life.inside ? 10 : driving ? 16 : 13) * zoom,
             pos.z +
               Math.cos(a) *
                 Math.cos(pitch) *
-                (life.inside ? 10 : driving ? 16 : 13),
+                (life.inside ? 10 : driving ? 16 : 13) *
+                zoom,
           );
       if (aiming && !ads) {
         const start = new T.Vector3(pos.x, 1.7, pos.z);
@@ -3268,14 +3657,18 @@ export function createGame(
       }
       if (ads) camera.position.copy(desired);
       else camera.position.lerp(desired, 1 - Math.exp(-dt * (aiming ? 16 : 5)));
-      camera.fov = ads ? 43 : aiming ? 50 : 53;
+      camera.fov = ads
+        ? T.MathUtils.clamp(43 * zoom, 25, 65)
+        : aiming
+          ? 50
+          : 53;
       camera.updateProjectionMatrix();
       shake *= Math.exp(-7 * dt);
       camera.position.x += Math.sin(elapsed * 91) * shake;
       camera.position.y += Math.cos(elapsed * 78) * shake;
       if (aiming)
         camera.lookAt(camera.position.clone().addScaledVector(forward, 40));
-      else camera.lookAt(pos.x, 1.8, pos.z);
+      else camera.lookAt(pos.x, 1.8 + player.position.y, pos.z);
     }
     player.visible =
       !driving &&
@@ -3308,6 +3701,20 @@ export function createGame(
           ? people.find((p) => p.state.id === requestedId)
           : nearbyWoman();
       report({
+        building:
+          buildingFloor !== null
+            ? {
+                floor: buildingFloor,
+                moving: liftRemaining > 0,
+                nearLift:
+                  Math.hypot(player.position.x - 400, player.position.z + 3.1) <
+                  1.55,
+                nearDelivery:
+                  buildingFloor === 2 &&
+                  Math.hypot(player.position.x - 404, player.position.z - 1) <
+                    2,
+              }
+            : null,
         social: woman
           ? {
               id: woman.state.id,
@@ -3326,8 +3733,8 @@ export function createGame(
             }
           : null,
         position: {
-          x: life.inside ? -40 : pos.x,
-          z: life.inside ? -75 : pos.z,
+          x: buildingFloor !== null ? 100 : life.inside ? -40 : pos.x,
+          z: buildingFloor !== null ? 56 : life.inside ? -75 : pos.z,
         },
         heading,
         playerHeading: driving ? ride.rotation.y : player.rotation.y,
@@ -3397,8 +3804,8 @@ export function createGame(
             ctx.translate(110, 110);
             ctx.rotate(-heading);
             ctx.translate(
-              -cv(life.inside ? -40 : pos.x),
-              -cv(life.inside ? -75 : pos.z),
+              -cv(buildingFloor !== null ? 100 : life.inside ? -40 : pos.x),
+              -cv(buildingFloor !== null ? 56 : life.inside ? -75 : pos.z),
             );
           }
           ctx.fillStyle = '#67716a';
@@ -3446,8 +3853,8 @@ export function createGame(
           ctx.fillRect(cv(ride.position.x) - 3, cv(ride.position.z) - 3, 6, 6);
           ctx.save();
           ctx.translate(
-            cv(life.inside ? -40 : pos.x),
-            cv(life.inside ? -75 : pos.z),
+            cv(buildingFloor !== null ? 100 : life.inside ? -40 : pos.x),
+            cv(buildingFloor !== null ? 56 : life.inside ? -75 : pos.z),
           );
           ctx.rotate(heading);
           ctx.fillStyle = '#d9ef8d33';
@@ -3520,8 +3927,72 @@ export function createGame(
     updateGuests(dt);
     renderer.render(scene, camera);
   }
+  // Buildings and roads do not move. Batch boxes by material to cut draw calls.
+  const batches = new Map<T.Material, T.BufferGeometry[]>();
+  let staticCount = 0;
+  for (const object of scene.children.slice())
+    if (object instanceof T.Mesh && object.userData.staticWorld) {
+      object.updateMatrixWorld(true);
+      const material = object.material as T.Material;
+      if (!batches.has(material)) batches.set(material, []);
+      batches
+        .get(material)!
+        .push(object.geometry.clone().applyMatrix4(object.matrixWorld));
+      scene.remove(object);
+      object.geometry.dispose();
+      staticCount++;
+    }
+  for (const [material, geometries] of batches) {
+    const geometry = mergeGeometries(geometries, false)!;
+    const mesh = new T.Mesh(geometry, material);
+    mesh.name = 'static-world-batch';
+    mesh.castShadow = mesh.receiveShadow = true;
+    scene.add(mesh);
+    geometries.forEach((g) => g.dispose());
+  }
+  scene.userData.staticBatching = { before: staticCount, after: batches.size };
   frame = requestAnimationFrame(animate);
   return {
+    presence: () => {
+      const p = activePosition();
+      return {
+        x: buildingFloor !== null ? 100 + (p.x - 400) : life.inside ? -40 : p.x,
+        z: buildingFloor !== null ? 56 + p.z : life.inside ? -75 : p.z,
+        heading: Math.atan2(
+          Math.sin(driving ? ride.rotation.y : player.rotation.y),
+          Math.cos(driving ? ride.rotation.y : player.rotation.y),
+        ),
+        speed: speed * 3.6,
+        mode: driving ? 'car' : riding ? 'bike' : 'walk',
+        inside: life.inside,
+        scene: buildingFloor !== null ? 'office:' + buildingFloor : 'outdoors',
+        hp,
+        armed,
+        emote: '',
+      };
+    },
+    onPeerAttack: (callback) => {
+      peerAttack = callback;
+    },
+    receiveDamage: (amount) => {
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      hp = Math.max(0, hp - amount);
+      life.hp = hp;
+      hurtTimer = 1;
+      shake = 0.15;
+      if (!hp) {
+        speed = 0;
+        bikeMotion.velocity = 0;
+        clear();
+        player.rotation.x = 1.4;
+      }
+      lastHud = 0;
+    },
+    typing: (value) => {
+      typing = value;
+      if (value) clear();
+    },
+    elevator: () => operateElevator(),
     setPeers,
     askNumber,
     open,
@@ -3555,6 +4026,7 @@ export function createGame(
       clear();
     },
     dispose: () => {
+      renderer.domElement.removeEventListener('wheel', wheel);
       renderer.domElement.removeEventListener('mousedown', mouseDown);
       window.removeEventListener('mousemove', mouseMove);
       window.removeEventListener('mouseup', mouseUp);

@@ -21,13 +21,13 @@ function load(file) {
     );
   if (file.endsWith('game.ts'))
     code = code.replace(
-      'return {\n        setPeers,',
-      'return {\n        __test:{people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;}},\n        setPeers,',
+      'return {\n        presence:',
+      'return {\n        __test:{people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;},bikeMotion,get buildingFloor(){return buildingFloor;}},\n        presence:',
     );
   code = code.replace(
     /from ['"]([^'"]+)['"]/g,
     (all, id) =>
-      `from '${id === 'three' ? import.meta.resolve('three') : id.startsWith('.') ? load(path.resolve(path.dirname(file), id + '.ts')) : id}'`,
+      `from '${id.startsWith('three') ? import.meta.resolve(id) : id.startsWith('.') ? load(path.resolve(path.dirname(file), id + '.ts')) : id}'`,
   );
   const url =
     'data:text/javascript;base64,' + Buffer.from(code).toString('base64');
@@ -499,6 +499,90 @@ settle();
 assert(scene.getObjectByName('guest-friend-test').visible);
 game.setPeers([]);
 assert(!scene.getObjectByName('guest-friend-test'));
+
+// Multiplayer combat hooks, typing isolation and the complete elevator delivery.
+player.position.set(0, 0, 40);
+player.rotation.set(0, 0, 0);
+game.open(null);
+settle();
+const outgoing = [];
+game.onPeerAttack((id, kind) => outgoing.push({ id, kind }));
+game.setPeers([
+  {
+    id: 'pvp-target',
+    name: '친구',
+    scene: 'outdoors',
+    x: 0,
+    z: 42,
+    heading: 0,
+    speed: 0,
+    mode: 'walk',
+    emote: '',
+    hp: 100,
+  },
+]);
+settle();
+game.attack();
+assert(outgoing.some((a) => a.id === 'pvp-target' && a.kind === 'punch'));
+const beforePvp = hud.hp;
+game.receiveDamage(35);
+settle();
+assert.equal(hud.hp, Math.max(0, beforePvp - 35));
+const beforeChat = player.position.clone();
+game.typing(true);
+game.key('w', true);
+for (let i = 0; i < 15; i++) step(20);
+assert(player.position.distanceTo(beforeChat) < 0.01);
+game.typing(false);
+game.key('w', false);
+game.setPeers([]);
+test.life.wanted = test.life.pendingHeat = 0;
+test.life.order = null;
+player.position.set(-40, 0, 56);
+settle();
+game.action('accept', '6');
+game.interact();
+settle();
+assert.equal(test.life.order.stage, 'dropoff');
+assert.equal(test.life.order.floor, 2);
+player.position.set(100, 0, 56);
+settle();
+const cashBefore = test.life.cash;
+game.interact();
+settle();
+assert.equal(hud.building.floor, 1);
+assert(test.life.order);
+assert.equal(test.life.cash, cashBefore);
+player.position.set(400, 0, -3.1);
+settle();
+game.interact();
+assert.equal(game.presence().scene, 'office:1');
+for (let i = 0; i < 155; i++) step(20);
+assert.equal(hud.building.floor, 2);
+assert.equal(player.position.y, 5);
+player.position.set(404, 5, 1);
+settle();
+game.interact();
+settle();
+assert.equal(test.life.order, null);
+assert(test.life.cash > cashBefore);
+player.position.set(400, 5, -3.1);
+settle();
+game.interact();
+for (let i = 0; i < 155; i++) step(20);
+assert.equal(hud.building.floor, 1);
+player.position.set(400, 0, 4);
+settle();
+assert.equal(hud.building, null);
+assert.equal(game.presence().scene, 'outdoors');
+assert(
+  scene.userData.staticBatching.before >
+    scene.userData.staticBatching.after * 5,
+);
+console.log(
+  'PASS PvP damage, chat input isolation, Olive Young 2F elevator delivery; static draw calls',
+  scene.userData.staticBatching,
+);
 game.dispose();
 console.log(
   'PASS proximity dismissal/reentry, joystick movement, road-safe trees, one death/drop/collection, rider scooter, mouse/touch ADS firing, left-click punch, stopped-car ejection and entry, player damage numbers, NPC contacts/following, and remote avatars.',

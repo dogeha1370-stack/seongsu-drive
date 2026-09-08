@@ -125,17 +125,17 @@ test('restaurant menus, BBQ shift and all six delivery routes settle once', () =
   assert.equal(s.minutes, time + 120);
   act(s, 'work', '', 'bbq');
   assert.equal(s.cash, before + 30000);
-  assert.equal(ORDER_ROUTES.length, 6);
-  for (let i = 0; i < 6; i++) {
+  assert.equal(ORDER_ROUTES.length, 7);
+  for (let i = 0; i < ORDER_ROUTES.length; i++) {
     const state = createLife();
     state.inside = false;
     act(state, 'accept', String(i));
     const order = state.order;
     assert(order);
     deliver(state, order.pickup);
-    deliver(state, order.dropoff);
+    deliver(state, order.dropoff, order.floor || 0);
     const paid = state.cash;
-    deliver(state, order.dropoff);
+    deliver(state, order.dropoff, order.floor || 0);
     assert.equal(state.cash, paid);
     assert.equal(state.deliveries, 1);
   }

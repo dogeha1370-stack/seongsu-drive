@@ -8,8 +8,20 @@ export type Peer = {
   speed: number;
   mode: 'walk' | 'bike' | 'car';
   emote: string;
+  hp?: number;
+  at?: number;
+};
+export type ChatMessage = {
+  id: number;
+  sender: string;
+  name: string;
+  text: string;
+  at: number;
 };
 export type PresenceState = {
+  hp?: number;
+  armed?: boolean;
+  scene?: string;
   x: number;
   z: number;
   heading: number;
@@ -37,7 +49,14 @@ export function connectGuests(
   snapshot: () => PresenceState,
   change: (value: Connection) => void,
   peers: (value: Peer[]) => void,
+  damage: (amount: number) => void = () => {},
+  chat: (messages: ChatMessage[]) => void = () => {},
 ) {
+  let damageSeen = 0,
+    messageAfter = 0;
+  let history: ChatMessage[] = [];
+  const attacks: { target: string; kind: 'gun' | 'punch'; attackId: string }[] =
+    [];
   let token = '',
     name = '',
     room = '',
@@ -63,6 +82,8 @@ export function connectGuests(
       name: string;
       room: string;
       peers: Peer[];
+      vitals?: { damageTotal: number; hp: number };
+      messages?: ChatMessage[];
       error?: string;
     };
     if (!response.ok)
@@ -72,17 +93,51 @@ export function connectGuests(
       );
     return result;
   }
+  function receive(result: {
+    peers: Peer[];
+    vitals?: { damageTotal: number };
+    messages?: ChatMessage[];
+  }) {
+    if (result.vitals && result.vitals.damageTotal > damageSeen) {
+      const delta = result.vitals.damageTotal - damageSeen;
+      damageSeen = result.vitals.damageTotal;
+      damage(delta);
+    }
+    if (result.messages?.length) {
+      const fresh = result.messages.filter((m) => m.id > messageAfter);
+      if (fresh.length) {
+        history = [...history, ...fresh].slice(-60);
+        messageAfter = history[history.length - 1].id;
+        chat(history);
+      }
+    }
+    peers(result.peers);
+  }
   async function sync(g: number) {
     if (closed || g !== generation || !token) return;
+    const started = performance.now();
     try {
       const state = snapshot();
       state.emote = Date.now() < emoteUntil ? emote : '';
-      const result = await post({ op: 'sync', token, seq: ++seq, state });
+      const result = await post({
+        op: 'sync',
+        token,
+        seq: ++seq,
+        state: { ...state, damageAck: damageSeen },
+        after: messageAfter,
+      });
       if (closed || g !== generation) return;
       lastOnline = Date.now();
-      peers(result.peers);
+      receive(result);
       report('online', '', result.peers.length + 1);
-      timer = setTimeout(() => sync(g), 350);
+      const attack = attacks.shift();
+      if (attack)
+        await post({ op: 'attack', token, ...attack }).catch(() => {});
+      if (!closed && g === generation)
+        timer = setTimeout(
+          () => sync(g),
+          Math.max(110, 180 - (performance.now() - started)),
+        );
     } catch (error) {
       if (closed || g !== generation) return;
       if (error instanceof ConnectionError && error.status === 401) {
@@ -104,6 +159,10 @@ export function connectGuests(
     clearTimeout(timer);
     const old = token;
     token = '';
+    damageSeen = messageAfter = 0;
+    history = [];
+    attacks.length = 0;
+    chat([]);
     peers([]);
     if (old) void post({ op: 'leave', token: old }).catch(() => {});
     report('joining');
@@ -121,9 +180,9 @@ export function connectGuests(
         localStorage.setItem('seongsu-guest-name', name);
       } catch {}
       lastOnline = Date.now();
-      peers(result.peers);
+      receive(result);
       report('online', '', result.peers.length + 1);
-      timer = setTimeout(() => sync(g), 350);
+      timer = setTimeout(() => sync(g), 160);
     } catch (error) {
       if (closed || g !== generation) return;
       const transient =
@@ -141,6 +200,14 @@ export function connectGuests(
   }
   return {
     join,
+    attack: (target: string, kind: 'gun' | 'punch') => {
+      if (token && !closed && attacks.length < 3)
+        attacks.push({ target, kind, attackId: crypto.randomUUID() });
+    },
+    sendChat: async (text: string) => {
+      if (!token || closed) throw new Error('먼저 거리에 접속하세요.');
+      await post({ op: 'chat', token, text });
+    },
     emote: (value: string) => {
       emote = value;
       emoteUntil = Date.now() + 3500;

@@ -1,5 +1,12 @@
 import { env } from 'cloudflare:workers';
-type Member = { id: string; room: string; name: string; updated_at: number };
+import { featureSchema, featureAction, extras } from './features';
+type Member = {
+  id: string;
+  room: string;
+  name: string;
+  updated_at: number;
+  seq?: number;
+};
 const TTL = 12000,
   CAPACITY = 24;
 const json = (value: unknown, status = 200) =>
@@ -16,6 +23,7 @@ let schema: Promise<unknown> | undefined;
 function init() {
   return (schema ??= (async () => {
     await env.DB.batch([
+      ...featureSchema(),
       env.DB.prepare(
         'CREATE TABLE IF NOT EXISTS presence_rooms(code TEXT PRIMARY KEY, created_at INTEGER NOT NULL)',
       ),
@@ -33,7 +41,7 @@ function init() {
 }
 async function peers(member: Member) {
   const result = await env.DB.prepare(
-    'SELECT id,name,scene,x,z,heading,speed,mode,emote FROM presence_players WHERE room=? AND id<>? AND updated_at>? LIMIT 24',
+    'SELECT p.id,p.name,p.scene,p.x,p.z,p.heading,p.speed,p.mode,p.emote,p.updated_at AS at,COALESCE(v.hp,100) AS hp FROM presence_players p LEFT JOIN presence_vitals v ON v.id=p.id WHERE p.room=? AND p.id<>? AND p.updated_at>? LIMIT 24',
   )
     .bind(member.room, member.id, Date.now() - TTL)
     .all();
@@ -105,7 +113,22 @@ export async function POST(request: Request) {
           { error: '방이 가득 찼습니다. 새 친구 방을 만들어 주세요.' },
           409,
         );
+      await env.DB.batch([
+        env.DB.prepare(
+          'INSERT INTO presence_vitals(id,protected_until) VALUES(?,?)',
+        ).bind(id, now + 3000),
+        env.DB.prepare(
+          'DELETE FROM presence_vitals WHERE id NOT IN (SELECT id FROM presence_players)',
+        ),
+        env.DB.prepare('DELETE FROM presence_hits WHERE created_at<?').bind(
+          now - 60000,
+        ),
+        env.DB.prepare('DELETE FROM presence_chat WHERE created_at<?').bind(
+          now - 86400000,
+        ),
+      ]);
       return json({
+        ...(await extras({ id, room, name })),
         id,
         token,
         name,
@@ -116,7 +139,7 @@ export async function POST(request: Request) {
     if (typeof data.token !== 'string' || data.token.length !== 72)
       return json({ error: '접속이 만료되었습니다.' }, 401);
     const member = await env.DB.prepare(
-      'SELECT id,room,name,updated_at FROM presence_players WHERE token_hash=?',
+      'SELECT id,room,name,updated_at,seq FROM presence_players WHERE token_hash=?',
     )
       .bind(await hash(data.token))
       .first<Member>();
@@ -128,6 +151,11 @@ export async function POST(request: Request) {
         .run();
       return json({ ok: true });
     }
+    await env.DB.prepare('INSERT OR IGNORE INTO presence_vitals(id) VALUES(?)')
+      .bind(member.id)
+      .run();
+    const feature = await featureAction(data, member, now);
+    if (feature) return feature;
     if (data.op !== 'sync') return json({ error: '잘못된 요청입니다.' }, 400);
     const state = data.state;
     if (
@@ -140,18 +168,27 @@ export async function POST(request: Request) {
       state.speed > 200 ||
       !['walk', 'bike', 'car'].includes(state.mode) ||
       typeof state.inside !== 'boolean' ||
+      (state.hp !== undefined &&
+        (!Number.isFinite(state.hp) || state.hp < 0 || state.hp > 100)) ||
+      (state.damageAck !== undefined &&
+        (!Number.isSafeInteger(state.damageAck) || state.damageAck < 0)) ||
+      (state.armed !== undefined && typeof state.armed !== 'boolean') ||
+      (state.scene !== undefined &&
+        !['outdoors', 'office:1', 'office:2'].includes(state.scene)) ||
       !Number.isSafeInteger(data.seq) ||
       data.seq < 1 ||
       !['', '👋', '😄', '배달 가자!', '잠깐만!'].includes(state.emote || '')
     )
       return json({ error: '위치 정보가 올바르지 않습니다.' }, 400);
-    if (now - member.updated_at < 150)
+    if (data.seq <= (member.seq ?? 0))
+      return json({ error: '이미 처리한 위치입니다.' }, 409);
+    if (now - member.updated_at < 100)
       return json({ error: '잠시 후 다시 연결합니다.' }, 429);
     await env.DB.prepare(
       'UPDATE presence_players SET scene=?,x=?,z=?,heading=?,speed=?,mode=?,emote=?,seq=?,updated_at=? WHERE id=? AND seq<?',
     )
       .bind(
-        state.inside ? 'home:' + member.id : 'outdoors',
+        state.inside ? 'home:' + member.id : state.scene || 'outdoors',
         state.x,
         state.z,
         state.heading,
@@ -164,7 +201,23 @@ export async function POST(request: Request) {
         data.seq,
       )
       .run();
-    return json({ peers: await peers(member) });
+    await env.DB.prepare(
+      'UPDATE presence_vitals SET protected_until=CASE WHEN hp<=0 AND ?>0 AND ?>=damage_total THEN ? ELSE protected_until END,hp=MAX(0,?-MAX(0,damage_total-?)),armed=? WHERE id=?',
+    )
+      .bind(
+        state.hp ?? 100,
+        state.damageAck ?? 0,
+        now + 3000,
+        state.hp ?? 100,
+        state.damageAck ?? 0,
+        state.armed ? 1 : 0,
+        member.id,
+      )
+      .run();
+    return json({
+      peers: await peers(member),
+      ...(await extras(member, data.after)),
+    });
   } catch (error) {
     console.error('Presence request failed', error);
     return json(

@@ -8,6 +8,7 @@ export type HumanRig = {
   legs: T.Bone[];
   knees: T.Bone[];
   pose: (time: number, speed: number, punch: number, down?: boolean) => void;
+  ride: (lean: number) => void;
 };
 export function createHuman(
   shirt: string,
@@ -151,9 +152,11 @@ export function createHuman(
     const amount = down ? 0 : Math.min(speed / 5, 1),
       cycle = time * (speed > 6 ? 13 : 9);
     hips.position.y = 0.92 + Math.abs(Math.sin(cycle)) * 0.025 * amount;
+    hips.rotation.z = 0;
     for (let i = 0; i < 2; i++) {
       const phase = cycle + i * Math.PI;
       legs[i].rotation.x = Math.sin(phase) * 0.65 * amount;
+      legs[i].rotation.z = 0;
       knees[i].rotation.x = Math.max(0, -Math.sin(phase)) * 0.7 * amount;
       arms[i].rotation.set(
         -Math.sin(phase) * 0.42 * amount,
@@ -171,5 +174,15 @@ export function createHuman(
     head.rotation.y = 0;
   };
   pose(0, 0, 0);
-  return { root, hips, head, arms, elbows, legs, knees, pose };
+  const ride = (lean: number) => {
+    hips.position.y = 0.76;
+    for (let i = 0; i < 2; i++) {
+      legs[i].rotation.set(-1.15, 0, i === 0 ? -0.13 : 0.13);
+      knees[i].rotation.x = 1.55;
+      arms[i].rotation.set(-1.15, 0, i === 0 ? 0.13 : -0.13);
+      elbows[i].rotation.x = -0.32;
+    }
+    hips.rotation.z = lean * 0.3;
+  };
+  return { root, hips, head, arms, elbows, legs, knees, pose, ride };
 }

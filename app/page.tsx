@@ -7,6 +7,9 @@ import { BBQ_MENU, type BbqItem } from './bbq';
 import { MCD_MENU, type McdItem } from './mcdonalds';
 import { Joystick } from './joystick';
 import { residentName } from './social';
+import { RoomChat } from './room-chat';
+import { BikeShowroom } from './bike-showroom';
+import type { ChatMessage } from './multiplayer';
 import { DECOR, WALL_COLORS, FLOOR_COLORS, type DecorId } from './decor';
 import {
   TrainFront,
@@ -113,6 +116,7 @@ const wantedLabels = [
   '대규모 추적',
 ];
 export default function Page() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const host = useRef<HTMLDivElement>(null),
     api = useRef<GameApi | null>(null);
   const [h, setHud] = useState<Hud>(initial);
@@ -138,26 +142,14 @@ export default function Page() {
       game = createGame(host.current!, setHud);
       api.current = game;
       const guests = connectGuests(
-        () => ({
-          x: latest.current.position.x,
-          z: latest.current.position.z,
-          heading: Math.atan2(
-            Math.sin(latest.current.playerHeading),
-            Math.cos(latest.current.playerHeading),
-          ),
-          speed: latest.current.speed,
-          mode: latest.current.driving
-            ? 'car'
-            : latest.current.riding
-              ? 'bike'
-              : 'walk',
-          inside: latest.current.life.inside,
-          emote: '',
-        }),
+        () => game.presence(),
         setConnection,
         (peers) => game.setPeers(peers),
+        (amount) => game.receiveDamage(amount),
+        setMessages,
       );
       network.current = guests;
+      game.onPeerAttack((id, kind) => guests.attack(id, kind));
       let preferred = '';
       try {
         preferred = localStorage.getItem('seongsu-guest-name') || '';
@@ -185,6 +177,14 @@ export default function Page() {
     home = HOUSES[s.homeTier],
     target = targetPlace(s),
     at = h.nearby ? place(h.nearby) : null;
+  const chatTyping = useCallback(
+    (value: boolean) => api.current?.typing(value),
+    [],
+  );
+  const sendChat = useCallback(async (text: string) => {
+    if (!network.current) throw new Error('먼저 접속하세요.');
+    await network.current.sendChat(text);
+  }, []);
   const action = useCallback(
       (type: Action, value = '') => api.current?.action(type, value),
       [],
@@ -214,6 +214,7 @@ export default function Page() {
     station: TrainFront,
     cafe: Coffee,
     food: Utensils,
+    beauty: Store,
     store: Store,
     garage: Wrench,
     estate: Building2,
@@ -1038,28 +1039,34 @@ export default function Page() {
                 </div>
               </>
             )}
-            <div className="cards">
-              {BIKES.map((b, i) => (
-                <article className="offer" key={b.name}>
-                  <Bike />
-                  <h3>{b.name}</h3>
-                  <p>
-                    최고 {Math.round(b.speed * 3.6)}km/h · 연료 / 내구도 관리
-                  </p>
-                  <button
-                    disabled={i <= s.bikeTier || s.cash < b.price}
-                    onClick={() => action('bike', String(i))}
-                  >
-                    {i === s.bikeTier
-                      ? '보유 중'
-                      : i < s.bikeTier
-                        ? '상위 모델 보유'
-                        : won(b.price) + ' · 구매'}
-                  </button>
-                </article>
-              ))}
-            </div>
+            <BikeShowroom
+              owned={s.bikeTier}
+              cash={s.cash}
+              buy={(i) => action('bike', String(i))}
+            />
           </>
+        )}
+        {at.id === 'office' && (
+          <article className="job">
+            <div>
+              <h3>서울숲 빌딩 · 2층</h3>
+              <p>1층 로비 → 엘리베이터 → 2층 201호</p>
+            </div>
+            <button onClick={() => api.current?.elevator()}>
+              로비 들어가기
+            </button>
+          </article>
+        )}
+        {at.id === 'olive' && (
+          <article className="olive-pickup">
+            <small>OLIVE YOUNG</small>
+            <h3>뷰티 박스 픽업</h3>
+            <p>
+              휴대폰에서 배달을 수락하고 E 키로 상품을 받아 주세요. 서울숲 빌딩
+              2층 201호에 전달합니다.
+            </p>
+            <button onClick={() => open('phone')}>배달 주문 보기</button>
+          </article>
         )}
         {at.kind === 'estate' && estatePanel()}
         {at.kind === 'loot' && (
@@ -1360,6 +1367,36 @@ export default function Page() {
                     : '번호 따기'}
           </button>
         </aside>
+      )}
+      {h.building && (
+        <aside className="elevator-hud">
+          <b>서울숲 빌딩 · {h.building.floor}F</b>
+          <p>
+            {h.building.moving
+              ? '엘리베이터 이동 중…'
+              : h.building.nearDelivery
+                ? '201호 · 상품 전달'
+                : h.building.nearLift
+                  ? '엘리베이터 · ' +
+                    (h.building.floor === 1 ? '2층으로' : '1층으로')
+                  : '엘리베이터는 복도 안쪽 · 1층 출구는 로비 앞'}
+          </p>
+          {!h.building.moving &&
+            (h.building.nearLift || h.building.nearDelivery) && (
+              <button onClick={() => api.current?.interact()}>
+                {h.building.nearDelivery ? '배달 완료하기' : '엘리베이터 타기'}{' '}
+                · E
+              </button>
+            )}
+        </aside>
+      )}
+      {(!h.panel || h.panel === 'place') && h.hp > 0 && (
+        <RoomChat
+          messages={messages}
+          send={sendChat}
+          typing={chatTyping}
+          online={connection.status === 'online'}
+        />
       )}
       <output className="context-hint">{h.hint}</output>
       {h.hurt && <div className="hurt" />}
@@ -1698,7 +1735,8 @@ export default function Page() {
                   ))}
                 </div>
                 <p className="subtle">
-                  집 밖에서 만나요. 소지품·돈·NPC는 각자의 플레이에 저장됩니다.
+                  집 밖에서 만나요. 친구끼리 공격과 채팅이 가능합니다.
+                  소지품·돈·NPC는 각자의 플레이에 저장됩니다.
                 </p>
               </div>
             )}

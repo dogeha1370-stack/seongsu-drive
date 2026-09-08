@@ -17,6 +17,15 @@ export const clamp = (n: number, min = 0, max = 100) =>
   Math.min(max, Math.max(min, n));
 export const PLACES = [
   {
+    id: 'olive',
+    name: '올리브영 성수점',
+    x: -40,
+    z: 56,
+    kind: 'beauty',
+    person: '올리브영 직원',
+    color: '#bbd832',
+  },
+  {
     id: 'bbq',
     name: 'BBQ 성수점',
     x: -100,
@@ -81,7 +90,7 @@ export const PLACES = [
   },
   {
     id: 'garage',
-    name: '성수 바이크 정비소',
+    name: '성수 모터스 · 바이크 샵',
     x: -100,
     z: -16,
     kind: 'garage',
@@ -324,10 +333,12 @@ export type Order = {
   dropoff: PlaceId;
   pay: number;
   label: string;
+  floor?: number;
   stage: 'pickup' | 'dropoff';
   deadline: number;
 };
 export const ORDER_ROUTES: {
+  floor?: number;
   pickup: PlaceId;
   dropoff: PlaceId;
   pay: number;
@@ -344,6 +355,13 @@ export const ORDER_ROUTES: {
   { pickup: 'cafe', dropoff: 'pc', pay: 5200, label: '아이스 라테 4잔' },
   { pickup: 'bbq', dropoff: 'office', pay: 8500, label: '황금올리브치킨 배달' },
   { pickup: 'bbq', dropoff: 'pc', pay: 7200, label: '황올 반+양념 반 배달' },
+  {
+    pickup: 'olive',
+    dropoff: 'office',
+    pay: 9800,
+    label: '올리브영 뷰티 박스 · 2층 201호',
+    floor: 2,
+  },
 ];
 export const EVENT_TYPES = [
   {
@@ -706,16 +724,21 @@ export const targetPlace = (s: Life) =>
     : s.nav
       ? place(s.nav)
       : null;
-export function deliver(s: Life, at: PlaceId) {
+export function deliver(s: Life, at: PlaceId, floor = 0) {
   if (!s.order) return '';
   if (s.order.stage === 'pickup' && at === s.order.pickup) {
     s.order.stage = 'dropoff';
     return log(
       s,
-      `음식 수령 완료 · ${place(s.order.dropoff).name}에 전달하세요.`,
+      `상품 수령 완료 · ${place(s.order.dropoff).name}${s.order.floor ? ` ${s.order.floor}층` : ''}에 전달하세요.`,
     );
   }
   if (s.order.stage === 'dropoff' && at === s.order.dropoff) {
+    if (s.order.floor && floor !== s.order.floor)
+      return log(
+        s,
+        `${s.order.floor}층 201호까지 엘리베이터를 타고 올라가세요.`,
+      );
     const pay = s.order.pay;
     earn(s, pay);
     s.deliveries++;
@@ -1230,6 +1253,7 @@ export function restoreLife(raw: string | null): Life {
     if (
       data.order &&
       (typeof data.order.label !== 'string' ||
+        (data.order.floor !== undefined && data.order.floor !== 2) ||
         !Number.isInteger(data.order.id) ||
         data.order.id < 1)
     )

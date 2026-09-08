@@ -42,3 +42,11 @@ PUBG의 모델이나 텍스처를 복사하지 않았습니다. 캐릭터를 화
 - [메이플스토리 월드 UI 가이드](https://maplestoryworlds-creators.nexon.com/ko/docs/?postId=1116)
 
 슬롯 선택 후 상세 정보를 확인하는 구성을 참고했습니다. 4×4 배치는 사용자가 요청한 게임용 구성이고, 부동산 아이콘·스타일은 직접 구현했습니다.
+
+## 바이크와 이동 동기화 (2026-09-09)
+
+- [Honda CB650R 공식 사양](https://www.honda.co.uk/motorcycles/range/street/cb650r/specifications-and-price.html): 휠·포크·연료탱크·시트의 구성을 참고했습니다. 브랜드 모델을 복제하거나 Honda 에셋을 배포한 것이 아니라 게임에 맞춘 원본 로우폴리 모델입니다.
+- [Three.js 물리 안내](https://threejs.org/manual/en/physics.html): 시각 모델과 충돌·운동 계산 분리 참고. 이 게임은 기존 물리 계산을 확장하며 별도 Ammo 엔진은 설치하지 않습니다.
+- [Gaffer On Games: Snapshot Interpolation](https://github.com/mas-bandwidth/gafferongames/blob/main/content/post/snapshot_interpolation.md): 받은 위치를 짧게 보관한 뒤 보간하는 방식 참고.
+
+올리브영 간판은 텍스트와 3D 기하로 구성하며 뷰티 박스 배달은 게임 속 가상 주문입니다.
