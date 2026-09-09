@@ -1,6 +1,7 @@
 import { connectSocketGuests } from './multiplayer-socket';
 export type Companion = { id: number; x: number; z: number; heading: number };
 export type Peer = {
+  y?:number;
   companion?: Companion | null;
   weapon?: number;
   id: string;
@@ -23,6 +24,8 @@ export type ChatMessage = {
   at: number;
 };
 export type PresenceState = {
+  train?:boolean;
+  y?:number;
   companion?: Companion | null;
   weapon?: number;
   hp?: number;
@@ -37,6 +40,7 @@ export type PresenceState = {
   emote: string;
 };
 export type Connection = {
+  admin?: boolean;
   status: 'offline' | 'joining' | 'online' | 'reconnecting';
   name: string;
   room: string;
@@ -208,6 +212,10 @@ export function connectGuests(
   }
   return {
     join,
+    onTeleport: (_callback: (p: {x:number;z:number;scene:string;heading:number;y?:number;train?:boolean}) => void) => {},
+    teleport: async (_target: string) => { throw new Error('EC2 서버에서 사용할 수 있습니다.'); },
+    admin: async (_code: string) => { throw new Error('EC2 서버에서 사용할 수 있습니다.'); },
+    kick: async (_target: string) => { throw new Error('EC2 서버에서 사용할 수 있습니다.'); },
     attack: (target: string, kind: 'gun' | 'punch') => {
       if (token && !closed && attacks.length < 3)
         attacks.push({ target, kind, attackId: crypto.randomUUID() });

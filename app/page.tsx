@@ -9,6 +9,7 @@ import { BBQ_MENU, type BbqItem } from './bbq';
 import { MCD_MENU, type McdItem } from './mcdonalds';
 import { Joystick } from './joystick';
 import { residentName } from './social';
+import { Inventory as InventoryWindow } from './inventory';
 import { RoomChat } from './room-chat';
 import { BikeShowroom } from './bike-showroom';
 import type { ChatMessage } from './multiplayer';
@@ -152,6 +153,7 @@ export default function Page() {
         setMessages,
       );
       network.current = guests;
+      guests.onTeleport(p => game.teleport(p));
       game.onPeerAttack((id, kind) => guests.attack(id, kind));
       let preferred = '';
       try {
@@ -1160,23 +1162,17 @@ export default function Page() {
           <span className="edition">성수에서, 내 방식대로.</span>
         </div>
         <nav className="header-actions" aria-label="게임 메뉴">
-          <button aria-label="친구와 만나기" onClick={() => open('friends')}>
+          <button title={`함께하기 · ${connection.count}명`} aria-label="친구와 만나기" onClick={() => open('friends')}>
             <Users size={19} />
-            <span>함께하기</span>
-            <b className="online-count">{connection.count}</b>
           </button>
-          <button onClick={() => open('phone')}>
+          <button title="휴대폰 · P" aria-label="휴대폰 열기" onClick={() => open('phone')}>
             <Smartphone size={19} />
-            <span>휴대폰</span>
-            <kbd>P</kbd>
           </button>
-          <button onClick={() => open('bag')} aria-label="가방 열기">
+          <button title="가방 · I" onClick={() => open('bag')} aria-label="가방 열기">
             <Backpack size={19} />
-            <span>가방</span>
           </button>
-          <button onClick={() => open('map')} aria-label="지도 열기">
+          <button title="지도 · M" onClick={() => open('map')} aria-label="지도 열기">
             <MapPin size={19} />
-            <span>지도</span>
           </button>
           <button aria-label="조작 도움말" onClick={() => open('help')}>
             <HelpCircle size={19} />
@@ -1324,6 +1320,15 @@ export default function Page() {
             : h.activity || '연무장길을 따라 걸어보세요'}
         </small>
       </div>
+      <div className="health-dock">
+      {(!h.panel || h.panel === 'place') && h.hp > 0 && (
+        <RoomChat
+          messages={messages}
+          send={sendChat}
+          typing={chatTyping}
+          online={connection.status === 'online'}
+        />
+      )}
       <section className="vitals health-only" aria-label="체력">
         <div>
           <span>
@@ -1334,6 +1339,7 @@ export default function Page() {
         </div>
         {s.caffeine >= 3 && <p className="danger">카페인 과다 · 손떨림</p>}
       </section>
+      </div>
       {h.social && !h.paused && (!h.panel || h.panel === 'place') && (
         <aside className="social-card">
           <Heart size={18} />
@@ -1371,6 +1377,7 @@ export default function Page() {
           </button>
         </aside>
       )}
+      {h.metro && <aside className="metro-hud"><TrainFront size={22}/><b>② 성수역</b><span>{h.metro.riding ? '열차 탑승 중' : '승강장'} · {h.metro.doors ? '문 열림' : '운행 중'}</span><button disabled={!h.metro.canUse} onClick={()=>api.current?.interact()}>{h.metro.riding ? '내리기' : '열차 타기'} · E</button></aside>}
       {h.building && (
         <aside className="elevator-hud">
           <b>서울숲 빌딩 · {h.building.floor}F</b>
@@ -1392,14 +1399,6 @@ export default function Page() {
               </button>
             )}
         </aside>
-      )}
-      {(!h.panel || h.panel === 'place') && h.hp > 0 && (
-        <RoomChat
-          messages={messages}
-          send={sendChat}
-          typing={chatTyping}
-          online={connection.status === 'online'}
-        />
       )}
       <output className="context-hint">{h.hint}</output>
       {h.hurt && <div className="hurt" />}
@@ -1639,9 +1638,13 @@ export default function Page() {
                   <output className="danger">{connection.error}</output>
                 )}
                 <div className="member-list" aria-label="접속 인원 목록">
-                  <h3>현재 방의 사람들 · {connection.count}명</h3>
+                  <h3>현재 방의 사람들 · {connection.count}명 {connection.admin && <em>관리자</em>}</h3>
                   {connection.status === 'online' && <p><b>{connection.name} · 나</b><span>{h.life.inside ? '집 안' : '접속 중'}</span></p>}
-                  {members.map(p => <p key={p.id}><b>{p.name}</b><span>{p.scene.startsWith('home:') ? '집 안' : p.scene.startsWith('office:') ? '빌딩 ' + p.scene.split(':')[1] + '층' : p.mode === 'bike' ? '바이크' : p.mode === 'car' ? '자동차' : '거리'}{p.companion ? ' · 동행 중' : ''}</span></p>)}
+                  {members.map(p => <div className="member-row" key={p.id}>
+                    <div><b>{p.name}</b><small>{p.scene.startsWith('home:') ? '집 안' : p.scene.startsWith('office:') ? '빌딩 ' + p.scene.split(':')[1] + '층' : '거리'}{p.companion ? ' · 동행 중' : ''}</small></div>
+                    <button onClick={async()=>{try{await network.current?.teleport(p.id);}catch(e){setCopyNotice(e instanceof Error?e.message:'이동하지 못했습니다.');}}}>친구에게 이동</button>
+                    {connection.admin && <button className="kick-button" onClick={async()=>{try{await network.current?.kick(p.id);setCopyNotice(p.name+' 님을 추방했습니다.');}catch(e){setCopyNotice(e instanceof Error?e.message:'추방하지 못했습니다.');}}}>추방</button>}
+                  </div>)}
                 </div>
                 <label>
                   닉네임{' '}
@@ -1714,21 +1717,21 @@ export default function Page() {
                         setRoomCode(e.target.value.toUpperCase())
                       }
                       placeholder="8자리 코드"
-                      maxLength={8}
+                      maxLength={9}
                     />
                   </label>
                   <button
                     disabled={
-                      roomCode.length !== 8 || connection.status === 'joining'
+                      (roomCode.length !== 8 && roomCode.length !== 9) || connection.status === 'joining'
                     }
-                    onClick={() =>
-                      network.current?.join({
-                        name: nickname || connection.name,
-                        room: roomCode,
-                      })
-                    }
+                    onClick={async () => {
+                      if (roomCode.length === 9) {
+                        try { await network.current?.admin(roomCode);setCopyNotice('관리자 모드로 전환했습니다.');setRoomCode(''); }
+                        catch(e) {setCopyNotice(e instanceof Error ? e.message : '인증 실패');}
+                      } else void network.current?.join({name:nickname || connection.name,room:roomCode});
+                    }}
                   >
-                    친구 방 입장
+                    {roomCode.length === 9 ? '관리자 모드' : '친구 방 입장'}
                   </button>
                   <output>{copyNotice}</output>
                 </div>
@@ -1754,70 +1757,7 @@ export default function Page() {
             )}
             {h.panel === 'phone' && phonePanel()}
             {h.panel === 'home' && homePanel()}
-            {h.panel === 'bag' && (
-              <div className="open-backpack">
-                <div className="bag-flap">
-                  <Backpack size={30} />
-                  <span>SEONGSU DAILY</span>
-                  <b>{countItems(s.inventory)} / 12</b>
-                </div>
-                <div className="bag-zipper" />
-                <div className="bag-compartments">
-                  {Array.from({ length: 12 }, (_, index) => {
-                    const items = Object.entries(s.inventory).flatMap(
-                      ([id, count]) =>
-                        Array.from({ length: count || 0 }, () => id as ItemId),
-                    );
-                    const id = items[index];
-                    return (
-                      <div
-                        className={'bag-slot ' + (id ? 'filled' : '')}
-                        key={index}
-                      >
-                        {id ? (
-                          <>
-                            <div className="bag-item-icon">
-                              {ITEMS[id].food ? (
-                                <Utensils size={30} />
-                              ) : ITEMS[id].energy ? (
-                                <Coffee size={30} />
-                              ) : (
-                                <Package size={30} />
-                              )}
-                            </div>
-                            <b>{ITEMS[id].name}</b>
-                            <small>
-                              {ITEMS[id].price
-                                ? 'HP +' + ITEMS[id].hp
-                                : won(ITEMS[id].sell)}
-                            </small>
-                            <div>
-                              {ITEMS[id].price > 0 && (
-                                <button onClick={() => action('consume', id)}>
-                                  꺼내 쓰기
-                                </button>
-                              )}
-                              {s.inside && (
-                                <button onClick={() => action('store', id)}>
-                                  보관
-                                </button>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <span>{String(index + 1).padStart(2, '0')}</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="bag-pocket">
-                  <Wallet size={20} />
-                  <span>앞주머니 · 현금</span>
-                  <b>{won(s.cash)}</b>
-                </div>
-              </div>
-            )}
+            {h.panel === 'bag' && <InventoryWindow life={s} action={action} />}
             {h.panel === 'place' && placePanel()}
             {h.panel === 'map' && (
               <>

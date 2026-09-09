@@ -21,8 +21,8 @@ function load(file) {
     );
   if (file.endsWith('game.ts'))
     code = code.replace(
-      'return {\n        presence:',
-      'return {\n        __test:{people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;},bikeMotion,get buildingFloor(){return buildingFloor;}},\n        presence:',
+      'return {\n        teleport:',
+      'return {\n        __test:{metro,people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;},bikeMotion,get buildingFloor(){return buildingFloor;}},\n        teleport:',
     );
   code = code.replace(
     /from ['"]([^'"]+)['"]/g,
@@ -604,6 +604,46 @@ assert(scene.getObjectByName('landmark-ADERERROR'));
 assert(scene.getObjectByName('landmark-PRADA'));
 assert(scene.getObjectByName('landmark-MUSINSA'));
 console.log('PASS reverse startup, recovery pose, remote companion and weapon selection');
+
+// Metro access, real boarding state, safe disembark and multiplayer height.
+game.open(null);game.typing(false);game.teleport({x:12.5,z:-46,scene:'outdoors',heading:0});
+player.position.set(12.5,0,-46);settle();
+for(let z=-45.8;z<=-22;z+=.2){assert(!test.playerBlocked(12.5,z,.5),'stairs must be traversable');player.position.z=z;step(20);}
+assert(player.position.y>9.8,'stairs reach the platform');
+player.position.set(16,3,-39);const beforeEscalator=player.position.z;for(let i=0;i<60;i++)step(20);
+assert(player.position.z>beforeEscalator+1,'escalator carries a standing player');
+const actualNow=Date.now;let metroNow=120000+1000;Date.now=()=>metroNow;
+player.position.set(5.5,10.2,0);settle();game.interact();settle();assert(hud.metro.riding);
+metroNow=120000+21000;settle();assert(player.position.z>20,'passenger travels with train');
+game.interact();settle();assert(hud.metro.riding,'cannot jump off a moving train');
+metroNow=120000+31000;settle();game.interact();settle();assert(!hud.metro.riding);assert.equal(player.position.x,5.5);assert(player.position.y>=10.2);
+assert.equal(game.presence().scene,'metro');assert.equal(game.presence().y,10.2);
+Date.now=actualNow;
+game.teleport({x:-40,z:-69,scene:'outdoors',heading:0});settle();assert.equal(game.presence().scene,'outdoors');
+const {signalGreen,signalDistance,separateCrowd}=await import(load('app/traffic.ts'));
+assert(signalGreen(true,1));assert(!signalGreen(false,1));assert(!signalGreen(true,15));assert(!signalGreen(false,15));assert(signalGreen(false,18));
+assert(Number.isFinite(signalDistance(5,-22,0,20)));assert.equal(signalDistance(5,-22,0,1),Infinity);
+const crowd=Array.from({length:8},(_,id)=>({id,x:20,z:0,hp:100}));for(let i=0;i<30;i++)separateCrowd(crowd,()=>false);
+for(let i=0;i<crowd.length;i++)for(let j=i+1;j<crowd.length;j++)assert(Math.hypot(crowd[i].x-crowd[j].x,crowd[i].z-crowd[j].z)>=1.04);
+const {sportsCar}=await import(load('app/vehicles.ts'));const model=sportsCar(0,'red');const axle=model.children.find(c=>c.type==='Group');model.userData.animateWheels(1);assert(axle.rotation.x>2);
+assert.equal(ownBike.userData.chassis,ownBike.userData.chassis.children.find(c=>c.geometry?.parameters?.width===.85)?.parent);
+console.log('PASS metro stairs, escalator, boarding/travel/exit, teleport, signals, crowd spacing, rotating wheels and attached delivery box');
+
+// Exercise the real traffic controller against a red/green intersection.
+game.open(null);player.position.set(-105,0,10);test.life.wanted=0;
+for(const v of test.vehicles){v.exploded=true;v.respawnTime=99999;v.hp=0;}
+const trafficCar=test.vehicles[0];trafficCar.exploded=false;trafficCar.hp=100;trafficCar.driverOut=false;trafficCar.waypoint=1;trafficCar.cruise=7;
+Object.assign(trafficCar.physics,{x:-28,z:5,angle:Math.PI/2,vx:6,vz:0,spin:0,stun:0});
+Date.now=()=>128000;
+for(let i=0;i<300;i++)step(20);
+assert(trafficCar.physics.x < -11.5,'red light stops car before intersection');
+assert(Math.hypot(trafficCar.physics.vx,trafficCar.physics.vz)<1,'car settles at red signal');
+const waitingX=trafficCar.physics.x;Date.now=()=>146000;
+for(let i=0;i<180;i++)step(20);
+assert(trafficCar.physics.x>waitingX+5,'green signal releases traffic');
+const {onRoad}=await import(load('app/traffic.ts'));assert(onRoad(trafficCar.physics.x,trafficCar.physics.z));
+Date.now=actualNow;
+console.log('PASS actual traffic braking for red, departure on green and road confinement');
 game.dispose();
 console.log(
   'PASS proximity dismissal/reentry, joystick movement, road-safe trees, one death/drop/collection, rider scooter, mouse/touch ADS firing, left-click punch, stopped-car ejection and entry, player damage numbers, NPC contacts/following, and remote avatars.',

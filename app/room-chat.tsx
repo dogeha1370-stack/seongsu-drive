@@ -21,11 +21,18 @@ export function RoomChat({
     end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && e.target.closest('input,textarea,select')) return;
-      if(e.key === 'Enter' && !e.repeat) { e.preventDefault();setOpened(v=>!v); }
+      if (
+        e.target instanceof HTMLElement &&
+        e.target.closest('input,textarea,select')
+      )
+        return;
+      if (e.key === 'Enter' && !e.repeat) {
+        e.preventDefault();
+        setOpened((v) => !v);
+      }
     };
-    window.addEventListener('keydown',key);
-    return ()=>window.removeEventListener('keydown',key);
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
   }, []);
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' });
@@ -54,18 +61,13 @@ export function RoomChat({
       className={'room-chat ' + (opened ? 'expanded' : '')}
       aria-label="같은 방 채팅"
     >
-      <button className="chat-toggle" aria-expanded={opened} aria-label={opened ? '채팅창 닫기' : '채팅창 열기'} onClick={() => setOpened(!opened)}>
-        <MessageCircle size={18} />
-        <span>{opened ? '방 채팅 · 닫기' : '채팅 열기'}</span>
-        {opened ? (
-          <X size={16} />
-        ) : (
-          <small>
-            {messages.length
-              ? messages[messages.length - 1].name
-              : '친구와 이야기하기'}
-          </small>
-        )}
+      <button
+        className="chat-toggle"
+        aria-expanded={opened}
+        aria-label={opened ? '채팅창 닫기' : '채팅창 열기'}
+        onClick={() => setOpened(!opened)}
+      >
+        {opened ? <X size={20} /> : <MessageCircle size={20} />}
       </button>
       {opened && (
         <>

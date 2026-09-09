@@ -47,17 +47,19 @@ export class Rooms {
   sync(p, data, now = Date.now()) {
     const s = data.state;
     if (s?.weapon !== undefined && (!Number.isInteger(s.weapon) || s.weapon < 0 || s.weapon > 3)) this.fail('잘못된 무기입니다.');
+    if(s?.y!==undefined&&(!Number.isFinite(s.y)||s.y<0||s.y>20))this.fail('잘못된 높이입니다.');
+    if(s?.train!==undefined&&typeof s.train!=='boolean')this.fail('잘못된 탑승 정보입니다.');
     const c = s?.companion;
     if (c != null && (!Number.isInteger(c.id) || c.id < 0 || c.id > 200 || ![c.x,c.z,c.heading].every(Number.isFinite) || Math.abs(c.x)>115 || Math.abs(c.z)>115 || Math.abs(c.heading)>100)) this.fail('잘못된 동행 정보입니다.');
     if (!s || ![s.x, s.z, s.heading, s.speed, s.hp].every(Number.isFinite) ||
       Math.abs(s.x) > 115 || Math.abs(s.z) > 115 || Math.abs(s.heading) > 100 || s.speed < 0 || s.speed > 200 ||
       s.hp < 0 || s.hp > 100 || !Number.isSafeInteger(s.damageAck) || s.damageAck < 0 || s.damageAck > p.damageTotal ||
       !['walk', 'bike', 'car'].includes(s.mode) || typeof s.inside !== 'boolean' || typeof s.armed !== 'boolean' ||
-      !['outdoors', 'office:1', 'office:2'].includes(s.scene || 'outdoors') ||
+      !['outdoors', 'office:1', 'office:2','metro'].includes(s.scene || 'outdoors') ||
       !['', '👋', '😄', '배달 가자!', '잠깐만!'].includes(s.emote || '') ||
       !Number.isSafeInteger(data.seq) || data.seq <= p.seq) this.fail('위치 정보가 올바르지 않습니다.');
     if (p.hp <= 0 && s.hp > 0 && s.damageAck === p.damageTotal) p.protectedUntil = now + 3000;
-    Object.assign(p, { x: s.x, z: s.z, heading: s.heading, speed: s.speed, mode: s.mode,
+    Object.assign(p, { train:!!s.train, y:s.y||0, x: s.x, z: s.z, heading: s.heading, speed: s.speed, mode: s.mode,
       scene: s.inside ? `home:${p.id}` : s.scene || 'outdoors', emote: s.emote || '',
       hp: Math.max(0, s.hp - (p.damageTotal - s.damageAck)), armed: s.armed, seq: data.seq, at: now,
       weapon: s.weapon ?? 0, companion: c ? { id:c.id,x:c.x,z:c.z,heading:c.heading } : null });
@@ -94,7 +96,7 @@ export class Rooms {
   snapshot(p, after = 0) {
     const room = this.rooms.get(p.room);
     return { type: 'snapshot', peers: [...room.members.values()].filter(b => b !== p && b.socket).map(b => ({
-      id: b.id, name: b.name, scene: b.scene, x: b.x, z: b.z, heading: b.heading, speed: b.speed,
+      id: b.id, name: b.name, scene: b.scene, y:b.y||0, x: b.x, z: b.z, heading: b.heading, speed: b.speed,
       mode: b.mode, emote: b.emote, hp: b.hp, at: b.at, weapon: b.weapon,
       companion: b.scene === 'outdoors' ? b.companion : null,
     })), vitals: { hp: p.hp, damageTotal: p.damageTotal }, messages: room.messages.filter(m => m.id > after), count: [...room.members.values()].filter(b => b.socket).length };

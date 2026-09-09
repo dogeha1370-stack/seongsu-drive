@@ -41,7 +41,7 @@ export function createGameServer({ root = fileURLToPath(new URL('../dist-ec2/cli
   };
   wss.on('connection', ws => {
     const started = Date.now();
-    let p, after = 0, budget = 0, budgetAt = started;
+    let p, after = 0, budget = 0, budgetAt = started, admin = false, lastAdminAttempt = 0;
     ws.alive = true;
     ws.on('pong', () => { ws.alive = true; if (p) p.at = Date.now(); });
     ws.on('error', () => {});
@@ -61,7 +61,26 @@ export function createGameServer({ root = fileURLToPath(new URL('../dist-ec2/cli
           send(ws, { type: 'joined', id: p.id, token: p.token, name: p.name, room: p.room, seq: p.seq, resumed, damageTotal: p.damageTotal });
         } else {
           if (!p || p.socket !== ws) throw new Error('먼저 접속하세요.');
-          if (data.op === 'sync') rooms.sync(p, data);
+          if (data.op === 'admin') {
+            if (now - lastAdminAttempt < 1500) rooms.fail('잠시 후 다시 시도하세요.',429);
+            lastAdminAttempt = now;
+            if (typeof data.code !== 'string' || data.code !== (process.env.ADMIN_CODE || '123123123')) rooms.fail('관리자 코드가 올바르지 않습니다.',403);
+            admin = true;
+          }
+          else if (data.op === 'kick') {
+            if (!admin) rooms.fail('관리자 권한이 필요합니다.',403);
+            const target = rooms.rooms.get(p.room)?.members.get(data.target);
+            if (!target || target === p) rooms.fail('추방할 접속자를 찾을 수 없습니다.',404);
+            const targetSocket = target.socket;
+            rooms.leave(target); target.socket = null;
+            if (targetSocket) { send(targetSocket,{type:'kicked',error:'관리자에 의해 퇴장되었습니다.'});targetSocket.close(4003,'Kicked'); }
+          }
+          else if (data.op === 'teleport') {
+            const target = rooms.rooms.get(p.room)?.members.get(data.target);
+            if (!target?.socket || target === p || p.hp <= 0 || target.hp <= 0) rooms.fail('이동할 친구를 찾을 수 없습니다.',404);
+            send(ws,{type:'teleport',destination:{x:target.x,z:target.z,scene:target.scene,heading:target.heading,y:target.y||0,train:!!target.train}});
+          }
+          else if (data.op === 'sync') rooms.sync(p, data);
           else if (data.op === 'chat') rooms.chat(p, data.text);
           else if (data.op === 'attack') rooms.attack(p, data);
           else if (data.op === 'leave') { rooms.leave(p); p = null; ws.close(1000); return; }
@@ -72,7 +91,7 @@ export function createGameServer({ root = fileURLToPath(new URL('../dist-ec2/cli
       } catch (error) { send(ws, { type: 'error', requestId: data?.requestId, error: error.message, status: error.status || 400, joining: !p }); }
     });
     ws.publish = () => {
-      if (p?.socket === ws) send(ws, rooms.snapshot(p, after));
+      if (p?.socket === ws) send(ws, {...rooms.snapshot(p, after), admin});
       else if (!p && Date.now() - started > 10000) ws.close(1008, 'Join timeout');
     };
   });

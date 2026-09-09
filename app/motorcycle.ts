@@ -194,5 +194,6 @@ export function createMotorcycle(color: string, tier = 0) {
     wheels.forEach((w) => (w.rotation.x = travel / 0.4));
   };
   root.userData.bikeTier = tier;
+  root.userData.chassis = chassis;
   return root;
 }

@@ -59,3 +59,8 @@ PUBG의 모델이나 텍스처를 복사하지 않았습니다. 캐릭터를 화
 - Porsche 911: 둥근 헤드램프와 아치형 루프. https://newsroom.porsche.com/en/press-kits/911/Exterior--design-and-body.html
 
 사용자 제공 사진 6장을 참고하여 ADERERROR 벽돌 건물, PRADA 삼각 패턴 파사드, MUSINSA 쌍박공지붕, Aēsop 차양 상가, 한정선 목재 상가와 콘크리트 고가도로를 직접 모델링했습니다. 지도 화면이나 사진 속 인물은 에셋으로 사용하지 않았습니다. AK-47·SCAR·저격소총은 게임용으로 직접 만든 단순화된 외형이며 수치는 게임 밸런스용입니다.
+
+## Inventory and elevated Seongsu station update
+- Inventory category tabs and square item slots reference Nexon's guide: https://gi.maplestory.nexon.com/Guide/Basic/RebootWorld . Original CSS, no copied MapleStory graphics.
+- Food photos and license attribution: public/food/credits.html (also linked in the inventory). Source JPEGs unmodified.
+- Elevated four-track, twin-platform station references Seongsu station's structure and the user's viaduct photo. Original procedural model, compressed 3-car, 120-second in-map shuttle; not the real Line 2 route or timetable. Seoul transport station report: https://www.joongangbiz.com/images/psdlocation.pdf .
