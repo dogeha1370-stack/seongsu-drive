@@ -27,19 +27,19 @@ export function stepBike(
   const acceleration =
     input >= 0
       ? input *
-        5.8 *
+        6.38 *
         Math.max(0.15, 1 - Math.max(0, s.velocity) / Math.max(1, maximum))
       : s.velocity > 0.1
         ? input * 10
         : input * 2;
-  const drag = 0.55 + 0.009 * s.velocity * s.velocity;
+  const drag = 0.55 + 0.00818 * s.velocity * s.velocity;
   const old = s.velocity;
   s.velocity += acceleration * dt;
   const resistance = (brake ? 13 : drag) * dt;
   s.velocity =
     Math.sign(s.velocity) * Math.max(0, Math.abs(s.velocity) - resistance);
   s.velocity = clamp(s.velocity, -2.2, Math.max(0, maximum));
-  if (maximum <= 0 && old >= 0) s.velocity = Math.max(0, old - 3 * dt);
+  if (maximum <= 0) s.velocity = Math.sign(old) * Math.max(0, Math.abs(old) - 3 * dt);
   const steer = clamp(turn, -1, 1) * (0.52 / (1 + Math.abs(s.velocity) / 9));
   s.steering += (steer - s.steering) * (1 - Math.exp(-dt * 9));
   const yawRate = (s.velocity / 1.65) * Math.tan(s.steering);

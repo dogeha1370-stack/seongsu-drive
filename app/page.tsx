@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { connectGuests, type Connection } from './multiplayer';
+import type { Peer } from './multiplayer';
+import { WEAPONS } from './weapons';
 import { Users, Copy } from 'lucide-react';
 import { BBQ_MENU, type BbqItem } from './bbq';
 import { MCD_MENU, type McdItem } from './mcdonalds';
@@ -116,6 +118,7 @@ const wantedLabels = [
   '대규모 추적',
 ];
 export default function Page() {
+  const [members, setMembers] = useState<Peer[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const host = useRef<HTMLDivElement>(null),
     api = useRef<GameApi | null>(null);
@@ -144,7 +147,7 @@ export default function Page() {
       const guests = connectGuests(
         () => game.presence(),
         setConnection,
-        (peers) => game.setPeers(peers),
+        (peers) => { game.setPeers(peers); setMembers(peers); },
         (amount) => game.receiveDamage(amount),
         setMessages,
       );
@@ -1461,6 +1464,7 @@ export default function Page() {
         )}
         {h.armed && !s.inside && (
           <p className="ammo-display">
+            <b>{WEAPONS[h.weapon ?? 0].name} </b>
             {h.reload ? '재장전 중…' : s.ammo + ' / ' + s.reserve + '발'}
           </p>
         )}
@@ -1479,10 +1483,13 @@ export default function Page() {
                 disabled={h.driving || h.riding}
                 onClick={() => api.current?.equip()}
               >
-                {h.armed ? '권총 넣기' : '권총'} <kbd>Q</kbd>
+                {h.armed ? '총 넣기' : '총 꺼내기'} <kbd>Q</kbd>
               </button>
               {h.armed && (
                 <>
+                  <select aria-label="총기 선택" value={h.weapon ?? 0} onChange={e=>api.current?.selectWeapon(Number(e.target.value))}>
+                    {WEAPONS.map((w,i)=><option key={w.name} value={i}>{i+1} · {w.name}</option>)}
+                  </select>
                   <button onClick={() => api.current?.attack()}>
                     발사 <kbd>F</kbd>
                   </button>
@@ -1631,6 +1638,11 @@ export default function Page() {
                 {connection.error && (
                   <output className="danger">{connection.error}</output>
                 )}
+                <div className="member-list" aria-label="접속 인원 목록">
+                  <h3>현재 방의 사람들 · {connection.count}명</h3>
+                  {connection.status === 'online' && <p><b>{connection.name} · 나</b><span>{h.life.inside ? '집 안' : '접속 중'}</span></p>}
+                  {members.map(p => <p key={p.id}><b>{p.name}</b><span>{p.scene.startsWith('home:') ? '집 안' : p.scene.startsWith('office:') ? '빌딩 ' + p.scene.split(':')[1] + '층' : p.mode === 'bike' ? '바이크' : p.mode === 'car' ? '자동차' : '거리'}{p.companion ? ' · 동행 중' : ''}</span></p>)}
+                </div>
                 <label>
                   닉네임{' '}
                   <input

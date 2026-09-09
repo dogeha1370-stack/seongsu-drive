@@ -1,5 +1,8 @@
 import { connectSocketGuests } from './multiplayer-socket';
+export type Companion = { id: number; x: number; z: number; heading: number };
 export type Peer = {
+  companion?: Companion | null;
+  weapon?: number;
   id: string;
   name: string;
   scene: string;
@@ -20,6 +23,8 @@ export type ChatMessage = {
   at: number;
 };
 export type PresenceState = {
+  companion?: Companion | null;
+  weapon?: number;
   hp?: number;
   armed?: boolean;
   scene?: string;

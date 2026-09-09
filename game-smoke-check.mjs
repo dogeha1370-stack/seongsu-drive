@@ -583,6 +583,27 @@ console.log(
   'PASS PvP damage, chat input isolation, Olive Young 2F elevator delivery; static draw calls',
   scene.userData.staticBatching,
 );
+// Regression: low-speed reverse must not be zeroed on each render frame.
+game.open(null);
+test.life.bikeTier = 0; test.life.fuel=100;test.life.bikeHp=100;
+const ownBike=scene.getObjectByName('player-bike');
+ownBike.position.set(0,0,25);player.position.set(0,0,25);
+game.mount();settle();assert(hud.riding);
+game.key('s',true);for(let i=0;i<60;i++)step(20);game.key('s',false);
+assert(test.bikeMotion.velocity < -.3, 'reverse must accelerate from rest');
+assert(player.position.distanceTo(new (await import('three')).Vector3(0,.22,25))>.2);
+player.rotation.z=.45;game.receiveDamage(100);game.action('recover');settle();
+assert.equal(player.rotation.z,0);assert.equal(test.bikeMotion.lean,0);assert.equal(game.presence().mode,'walk');
+game.open(null);player.position.set(300,0,4.3);settle();
+game.setPeers([{id:'companion-test',name:'친구',scene:'outdoors',x:0,z:25,heading:0,speed:0,mode:'walk',emote:'',companion:{id:2,x:1,z:25,heading:0}}]);settle();
+assert(scene.getObjectByName('guest-companion-companion-test').visible);
+game.setPeers([]);assert(!scene.getObjectByName('guest-companion-companion-test'));
+game.selectWeapon(1);for(let i=0;i<140;i++)step(20);assert.equal(game.presence().weapon,1);assert(hud.life.ammo>0);
+game.selectWeapon(3);for(let i=0;i<160;i++)step(20);assert.equal(hud.life.ammo,5);
+assert(scene.getObjectByName('landmark-ADERERROR'));
+assert(scene.getObjectByName('landmark-PRADA'));
+assert(scene.getObjectByName('landmark-MUSINSA'));
+console.log('PASS reverse startup, recovery pose, remote companion and weapon selection');
 game.dispose();
 console.log(
   'PASS proximity dismissal/reentry, joystick movement, road-safe trees, one death/drop/collection, rider scooter, mouse/touch ADS firing, left-click punch, stopped-car ejection and entry, player damage numbers, NPC contacts/following, and remote avatars.',

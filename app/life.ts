@@ -234,11 +234,11 @@ export const HOUSES = [
   },
 ] as const;
 export const BIKES = [
-  { name: '중고 스쿠터', price: 800000, speed: 15 },
-  { name: '125cc 시티 스쿠터', price: 2200000, speed: 20 },
-  { name: '투어링 스쿠터', price: 4200000, speed: 24 },
-  { name: '네이키드 바이크', price: 7500000, speed: 29 },
-  { name: '프리미엄 바이크', price: 16000000, speed: 34 },
+  { name: '중고 스쿠터', price: 800000, speed: 16.5 },
+  { name: '125cc 시티 스쿠터', price: 2200000, speed: 22 },
+  { name: '투어링 스쿠터', price: 4200000, speed: 26.4 },
+  { name: '네이키드 바이크', price: 7500000, speed: 31.9 },
+  { name: '프리미엄 바이크', price: 16000000, speed: 37.4 },
 ] as const;
 export const ITEMS = {
   ...MCD_MENU,
@@ -1383,7 +1383,7 @@ export function restoreLife(raw: string | null): Life {
     for (const key of ['hp', 'fuel', 'bikeHp'] as const)
       data[key] = clamp(data[key]);
     data.caffeine = clamp(data.caffeine, 0, 6);
-    data.ammo = Math.floor(clamp(data.ammo, 0, 12));
+    data.ammo = Math.floor(clamp(data.ammo, 0, 30));
     data.reserve = Math.floor(clamp(data.reserve, 0, 9999));
     data.wanted = Math.floor(clamp(data.wanted, 0, 5));
     data.pendingHeat = clamp(data.pendingHeat, 0, 5);

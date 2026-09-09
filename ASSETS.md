@@ -50,3 +50,12 @@ PUBG의 모델이나 텍스처를 복사하지 않았습니다. 캐릭터를 화
 - [Gaffer On Games: Snapshot Interpolation](https://github.com/mas-bandwidth/gafferongames/blob/main/content/post/snapshot_interpolation.md): 받은 위치를 짧게 보관한 뒤 보간하는 방식 참고.
 
 올리브영 간판은 텍스트와 3D 기하로 구성하며 뷰티 박스 배달은 게임 속 가상 주문입니다.
+# 2026-09 차량·랜드마크 업데이트
+
+차량은 아래 공식 디자인 자료의 실루엣을 참고하여 직접 만든 로우폴리 3D 모델입니다. 공식 제조사 에셋이나 정밀 복제 모델은 아닙니다.
+
+- Ferrari 296 GTB: 낮은 차체와 짧은 후면, 중앙 캐빈. https://www.ferrari.com/content/dam/ferrari-fcom/old/pdf/CS_296_GTB_final_gbr.pdf
+- Lamborghini Revuelto: 쐐기형 전면과 Y형 램프, 넓은 후면. https://www.lamborghini.com/en-en/models/revuelto-models/revuelto
+- Porsche 911: 둥근 헤드램프와 아치형 루프. https://newsroom.porsche.com/en/press-kits/911/Exterior--design-and-body.html
+
+사용자 제공 사진 6장을 참고하여 ADERERROR 벽돌 건물, PRADA 삼각 패턴 파사드, MUSINSA 쌍박공지붕, Aēsop 차양 상가, 한정선 목재 상가와 콘크리트 고가도로를 직접 모델링했습니다. 지도 화면이나 사진 속 인물은 에셋으로 사용하지 않았습니다. AK-47·SCAR·저격소총은 게임용으로 직접 만든 단순화된 외형이며 수치는 게임 밸런스용입니다.

@@ -1,3 +1,6 @@
+import { sportsCar } from './vehicles';
+import { LANDMARKS, landmark } from './landmarks';
+import { WEAPONS, weaponModel } from './weapons';
 import { FEMALE_RESIDENT_IDS, residentName, numberChance } from './social';
 import type { Peer, PresenceState } from './multiplayer';
 import { createMotorcycle } from './motorcycle';
@@ -86,6 +89,7 @@ export type Hud = {
   riding: boolean;
   aiming: boolean;
   ads: boolean;
+  weapon?: number;
   reload: number;
   spread: number;
   saveStatus: string;
@@ -112,6 +116,7 @@ export type GameApi = {
   setPeers: (peers: Peer[]) => void;
   jump: () => void;
   equip: () => void;
+  selectWeapon: (id: number) => void;
   dispose: () => void;
   pause: () => void;
   reset: () => void;
@@ -288,6 +293,11 @@ export function createGame(
         d = 34,
         h = x === 100 && z === 36 ? 8 : 8 + (n % 4) * 3;
       box(w + 5, 0.3, d + 5, '#b6b4a5', x, 0.12, z);
+      if (LANDMARKS[n]) {
+        const item = LANDMARKS[n], building = landmark(item.style, item.name);
+        building.position.set(x,0,z);scene.add(building);
+        solids.push({x,z,w:w+1,d:d+1,h:12});n++;continue;
+      }
       box(
         w,
         h,
@@ -323,6 +333,19 @@ export function createGame(
       );
       n++;
     }
+  // Elevated concrete railway inspired by the supplied Seongsu viaduct photo.
+  box(22, .8, 218, '#94958b', 0, 9.2, 0);
+  for(const x of [-9.7,9.7]) {
+    box(.4,1.3,218,'#75786e',x,10.1,0);
+    for(const z of [-96,-36,36,96]) {
+      box(1,9,1.5,'#a3a394',x,4.5,z);
+      box(1.05,2,1.55,'#d6b543',x,1,z);
+      for(let y=.25;y<2;y+=.4){const stripe=box(1.08,.15,1.57,'#353936',x,y,z);stripe.rotation.z=.2;}
+      solids.push({x,z,w:1,d:1.5,h:9});
+      box(20,.7,1.2,'#8a8d81',0,8.6,z);
+      box(1.2,.12,.6,'#f3e9be',x*.7,8.15,z);
+    }
+  }
   const oliveSign = sign('OLIVE YOUNG', 27, -40, 5.8, 53.6);
   (oliveSign.material as T.MeshStandardMaterial).color.set('#d1ed57');
   box(29, 1.2, 0.35, '#b7d631', -40, 3.7, 53.6);
@@ -469,29 +492,10 @@ export function createGame(
   sign('성수역  ②', 12, 3, 7, -13, '#245e45');
   box(0.3, 7, 0.3, '#697368', -3, 3.5, -13);
   box(0.3, 7, 0.3, '#697368', 9, 3.5, -13);
+  let carIndex = 0;
   function car(color: string, x: number, z: number) {
-    const g = new T.Group();
-    box(2.3, 0.65, 4.3, color, 0, 0.85, 0, g);
-    box(2, 0.8, 2.1, color, 0, 1.5, -0.15, g);
-    box(1.84, 0.62, 0.08, '#27444a', 0, 1.54, 0.95, g);
-    box(1.84, 0.62, 0.08, '#27444a', 0, 1.54, -1.23, g);
-    for (const s of [-1, 1]) {
-      box(0.06, 0.56, 1.8, '#27444a', s * 1.02, 1.55, -0.13, g);
-      for (const zz of [-1.35, 1.35]) {
-        const m = new T.Mesh(
-          new T.CylinderGeometry(0.47, 0.47, 0.25, 12),
-          mat('#20292b'),
-        );
-        m.rotation.z = Math.PI / 2;
-        m.position.set(s * 1.15, 0.53, zz);
-        g.add(m);
-      }
-      box(0.6, 0.22, 0.05, '#ffedb5', s * 0.7, 0.9, 2.17, g);
-      box(0.55, 0.18, 0.05, '#ae3f2c', s * 0.7, 0.95, -2.17, g);
-    }
-    g.position.set(x, 0, z);
-    scene.add(g);
-    return g;
+    const g = sportsCar(carIndex++ % 3, color);
+    g.position.set(x, 0, z); scene.add(g); return g;
   }
   const room = new T.Group();
   room.position.set(300, 0, 0);
@@ -1102,6 +1106,7 @@ export function createGame(
           obstacleBounds().some(
             (b) => circleVehicleCorrection(x, z, r, b) !== null,
           );
+  let triggerHeld = false;
   let armed = false,
     jumpVelocity = 0,
     shotCooldown = 0,
@@ -1110,10 +1115,9 @@ export function createGame(
     rightDownAt = 0,
     rightMoved = 0,
     adsBefore = false;
+  let weapon = 0;
   const gun = new T.Group();
-  box(0.14, 0.15, 0.48, '#35404a', 0, 0, 0, gun);
-  box(0.12, 0.25, 0.14, '#222a30', 0, -0.16, -0.11, gun);
-  box(0.06, 0.035, 0.06, '#a6b6ba', 0, 0.09, 0.13, gun);
+  gun.add(weaponModel(0));
   gun.position.set(0.37, 1.46, 0.6);
   gun.visible = false;
   player.add(gun);
@@ -1327,6 +1331,7 @@ export function createGame(
       labelText: string;
       target: Peer;
       vehicle: T.Group | null;
+      companion: HumanRig | null;
       samples: MotionSample[];
     }
   >();
@@ -1361,6 +1366,10 @@ export function createGame(
     const g = guests.get(id);
     if (!g) return;
     scene.remove(g.rig.root, g.label);
+    if (g.companion) {
+      scene.remove(g.companion.root);
+      g.companion.root.traverse(o => { if(o instanceof T.Mesh){o.geometry.dispose();(o.material as T.Material).dispose();} });
+    }
     disposeGuestVehicle(g.vehicle);
     g.label.material.map?.dispose();
     g.label.material.dispose();
@@ -1410,6 +1419,7 @@ export function createGame(
           labelText: text,
           target: p,
           vehicle: null,
+          companion: null,
           samples: [{ ...p, at: performance.now() }],
         };
         guests.set(p.id, g);
@@ -1442,6 +1452,13 @@ export function createGame(
         if (g.samples.length > 8) g.samples.shift();
       }
       g.target = p;
+      if (p.companion && !g.companion) {
+        const id = p.companion.id;
+        g.companion = createHuman(['#b597bb','#c1aaa1','#95aaba'][id % 3], SKIN_TONES[id % 6], HAIR_COLORS[Math.floor(id / 3) % 6], true);
+        g.companion.root.name = 'guest-companion-' + p.id;
+        g.companion.root.position.set(p.companion.x, 0, p.companion.z);
+        scene.add(g.companion.root);
+      }
     }
   }
   function updateGuests(_dt: number) {
@@ -1451,6 +1468,15 @@ export function createGame(
       g.rig.root.visible = visible && p.mode !== 'car';
       g.label.visible = visible;
       if (g.vehicle) g.vehicle.visible = visible;
+      if (g.companion) {
+        g.companion.root.visible = visible && !!p.companion;
+        if (p.companion) {
+          const c = p.companion;
+          g.companion.root.position.lerp(new T.Vector3(c.x, 0, c.z), 1-Math.exp(-_dt*12));
+          g.companion.root.rotation.y = c.heading;
+          g.companion.pose(elapsed, Math.hypot(c.x-g.companion.root.position.x,c.z-g.companion.root.position.z)>.06?4:0, 0);
+        }
+      }
       const root = g.rig.root;
       const motion = sampleMotion(g.samples, performance.now());
       root.position.set(
@@ -1503,6 +1529,8 @@ export function createGame(
   }
   function enterHome() {
     life.inside = true;
+    Object.assign(bikeMotion, newBikeMotion());
+    playerRig.pose(0, 0, 0);
     riding = driving = false;
     armed = false;
     gun.visible = false;
@@ -1564,7 +1592,9 @@ export function createGame(
       buildingFloor = null;
       liftRemaining = 0;
       paused = false;
-      player.rotation.x = 0;
+      player.rotation.set(0, Math.PI, 0);
+      playerRig.pose(0, 0, 0);
+      Object.assign(bikeMotion, newBikeMotion());
       enterHome();
     }
     if (action === 'navigate') open(null);
@@ -1615,6 +1645,18 @@ export function createGame(
         say(life.logs[0].text);
     }
   }
+  function selectWeapon(id: number) {
+    if (!WEAPONS[id] || hp <= 0 || riding || driving) return;
+    life.reserve += life.ammo; life.ammo = 0;
+    weapon = id; reloadTime = 0; shotCooldown = 0;
+    for (const root of [gun, viewGun]) {
+      for (const child of root.children.slice()) if (child instanceof T.Group) {
+        root.remove(child); child.traverse(o => { if(o instanceof T.Mesh){o.geometry.dispose();(o.material as T.Material).dispose();} });
+      }
+      root.add(weaponModel(id));
+    }
+    armed = true; reload(); say(WEAPONS[id].name + ' · R 재장전'); lastHud=0;
+  }
   function reload() {
     if (
       paused ||
@@ -1624,14 +1666,14 @@ export function createGame(
       !armed ||
       hp <= 0 ||
       reloadTime ||
-      life.ammo === 12
+      life.ammo >= WEAPONS[weapon].magazine
     )
       return;
     if (!life.reserve) {
       say('예비 탄약이 없습니다.');
       return;
     }
-    reloadTime = 2;
+    reloadTime = WEAPONS[weapon].reload;
     aiming = ads = false;
     say('재장전 중…');
   }
@@ -2064,15 +2106,15 @@ export function createGame(
     }
     life.ammo--;
     crime(2, true);
-    shotCooldown = 0.3;
+    shotCooldown = WEAPONS[weapon].cooldown;
     shotTime = 0.08;
     player.rotation.y = yaw + orbit + Math.PI;
     player.updateMatrixWorld(true);
     const origin = gun.getWorldPosition(new T.Vector3());
     const sight = new T.Raycaster();
     sight.setFromCamera(new T.Vector2(0, 0), camera);
-    const aimPoint = sight.ray.at(65, new T.Vector3());
-    let aimDistance = 65;
+    const aimPoint = sight.ray.at(WEAPONS[weapon].range, new T.Vector3());
+    let aimDistance: number = WEAPONS[weapon].range;
     const point = new T.Vector3();
     const bounds = [
       ...solids.map(
@@ -2141,7 +2183,7 @@ export function createGame(
     direction.normalize();
     recoil = Math.min(0.08, recoil + 0.025);
     const ray = new T.Ray(origin, direction);
-    let distance = 65;
+    let distance: number = WEAPONS[weapon].range;
     const impactNormal = direction.clone().negate(),
       ground = new T.Vector3();
     const grounded = new T.Ray(origin, direction).intersectPlane(
@@ -2217,9 +2259,9 @@ export function createGame(
       }
     if (peerVictim) peerAttack(peerVictim, 'gun');
     if (victim) {
-      damagePerson(victim.state, 35);
+      damagePerson(victim.state, WEAPONS[weapon].damage);
       hitPerson(victim.state, direction.x, direction.z, 3);
-      notice = '명중 · NPC 체력 -35';
+      notice = '명중 · NPC 체력 -' + WEAPONS[weapon].damage;
       noticeTime = 0.7;
     } else if (vehicleTarget && vehicleTarget.hp > 0) {
       vehicleTarget.hp = Math.max(0, vehicleTarget.hp - 20);
@@ -2504,6 +2546,7 @@ export function createGame(
     }
   }
   function clear() {
+    triggerHeld = false;
     ads = false;
     rightDownAt = 0;
     analog.x = analog.y = 0;
@@ -3175,6 +3218,7 @@ export function createGame(
       if (k === 'e') interact();
       if (k === 'f') attack();
       if (k === 'q') equip();
+      if (['1','2','3','4'].includes(k)) selectWeapon(Number(k)-1);
       if (k === 'v') mount();
       if (k === 'p' || k === 'tab') {
         e.preventDefault();
@@ -3220,6 +3264,7 @@ export function createGame(
   const mouseDown = (e: MouseEvent) => {
     if (e.button === 0) {
       e.preventDefault();
+      triggerHeld = true;
       attack();
       return;
     }
@@ -3252,6 +3297,7 @@ export function createGame(
     py = e.clientY;
   };
   const mouseUp = (e: MouseEvent) => {
+    if (e.button === 0) triggerHeld = false;
     if (e.button !== 2) return;
     drag = false;
     if (
@@ -3478,10 +3524,11 @@ export function createGame(
             crime(1);
             bikeMotion.velocity *= 0.7;
           }
-        if (before.distanceTo(player.position) < 0.001 && speed < 0.1)
+        if (impact && before.distanceTo(player.position) < 0.001 && speed < 0.1)
           bikeMotion.velocity = 0;
       }
       if (!driving && !riding) {
+        player.rotation.z = 0;
         jumpVelocity -= 18 * dt;
         const groundY = buildingFloor !== null ? (buildingFloor - 1) * 5 : 0;
         player.position.y = Math.max(
@@ -3559,13 +3606,14 @@ export function createGame(
       playerRig.pose(elapsed, driving || riding ? 0 : speed, punch);
       if (riding) playerRig.ride(bikeMotion.lean);
       shotCooldown = Math.max(0, shotCooldown - dt);
+      if (triggerHeld && armed && (weapon === 1 || weapon === 2) && !shotCooldown && life.ammo > 0) shoot();
       shotTime = Math.max(0, shotTime - dt);
       recoil = Math.max(0, recoil - dt * 0.055);
       stableAim = aiming && speed < 0.1 ? stableAim + dt : 0;
       if (reloadTime > 0) {
         reloadTime = Math.max(0, reloadTime - dt);
         if (!reloadTime) {
-          const rounds = Math.min(12 - life.ammo, life.reserve);
+          const rounds = Math.min(WEAPONS[weapon].magazine - life.ammo, life.reserve);
           life.ammo += rounds;
           life.reserve -= rounds;
           say('재장전 완료');
@@ -3658,7 +3706,7 @@ export function createGame(
       if (ads) camera.position.copy(desired);
       else camera.position.lerp(desired, 1 - Math.exp(-dt * (aiming ? 16 : 5)));
       camera.fov = ads
-        ? T.MathUtils.clamp(43 * zoom, 25, 65)
+        ? weapon === 3 ? T.MathUtils.clamp(20 * zoom, 12, 35) : T.MathUtils.clamp(43 * zoom, 25, 65)
         : aiming
           ? 50
           : 53;
@@ -3744,6 +3792,7 @@ export function createGame(
         riding,
         aiming,
         ads,
+        weapon,
         reload: reloadTime,
         spread: Math.round(
           8 + speed * 2 + (life.caffeine >= 3 ? 15 : 0) + recoil * 100,
@@ -3955,6 +4004,8 @@ export function createGame(
   return {
     presence: () => {
       const p = activePosition();
+      const companion = people.find(n => n.active && n.state.hp > 0 && n.state.id === life.companionId);
+
       return {
         x: buildingFloor !== null ? 100 + (p.x - 400) : life.inside ? -40 : p.x,
         z: buildingFloor !== null ? 56 + p.z : life.inside ? -75 : p.z,
@@ -3968,6 +4019,8 @@ export function createGame(
         scene: buildingFloor !== null ? 'office:' + buildingFloor : 'outdoors',
         hp,
         armed,
+        weapon,
+        companion: companion && !life.inside && buildingFloor === null ? { id: companion.state.id, x: companion.state.x, z: companion.state.z, heading: companion.mesh.rotation.y } : null,
         emote: '',
       };
     },
@@ -4004,6 +4057,7 @@ export function createGame(
       }
     },
     mount,
+    selectWeapon,
     reload,
     aim: () => {
       if (armed && movementAllowed() && !paused) {

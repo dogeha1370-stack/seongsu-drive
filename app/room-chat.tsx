@@ -20,6 +20,14 @@ export function RoomChat({
   const input = useRef<HTMLInputElement>(null),
     end = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest('input,textarea,select')) return;
+      if(e.key === 'Enter' && !e.repeat) { e.preventDefault();setOpened(v=>!v); }
+    };
+    window.addEventListener('keydown',key);
+    return ()=>window.removeEventListener('keydown',key);
+  }, []);
+  useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' });
   }, [messages, opened]);
   useEffect(() => {
@@ -46,9 +54,9 @@ export function RoomChat({
       className={'room-chat ' + (opened ? 'expanded' : '')}
       aria-label="같은 방 채팅"
     >
-      <button className="chat-toggle" onClick={() => setOpened(!opened)}>
+      <button className="chat-toggle" aria-expanded={opened} aria-label={opened ? '채팅창 닫기' : '채팅창 열기'} onClick={() => setOpened(!opened)}>
         <MessageCircle size={18} />
-        <span>방 채팅</span>
+        <span>{opened ? '방 채팅 · 닫기' : '채팅 열기'}</span>
         {opened ? (
           <X size={16} />
         ) : (

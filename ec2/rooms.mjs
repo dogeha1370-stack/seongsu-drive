@@ -24,7 +24,7 @@ export class Rooms {
       name: requested || `성수산책가-${String(randomInt(10000)).padStart(4, '0')}`,
       x: -40, z: -69, heading: 0, speed: 0, mode: 'walk', scene: 'outdoors', emote: '',
       hp: 100, damageTotal: 0, armed: false, seq: 0, at: now, protectedUntil: now + 3000,
-      lastAttack: 0, lastChat: 0, hits: new Map(), socket };
+      lastAttack: 0, lastChat: 0, hits: new Map(), socket, weapon: 0, companion: null };
     room.members.set(p.id, p); this.sessions.set(p.token, p);
     return p;
   }
@@ -46,6 +46,9 @@ export class Rooms {
   }
   sync(p, data, now = Date.now()) {
     const s = data.state;
+    if (s?.weapon !== undefined && (!Number.isInteger(s.weapon) || s.weapon < 0 || s.weapon > 3)) this.fail('잘못된 무기입니다.');
+    const c = s?.companion;
+    if (c != null && (!Number.isInteger(c.id) || c.id < 0 || c.id > 200 || ![c.x,c.z,c.heading].every(Number.isFinite) || Math.abs(c.x)>115 || Math.abs(c.z)>115 || Math.abs(c.heading)>100)) this.fail('잘못된 동행 정보입니다.');
     if (!s || ![s.x, s.z, s.heading, s.speed, s.hp].every(Number.isFinite) ||
       Math.abs(s.x) > 115 || Math.abs(s.z) > 115 || Math.abs(s.heading) > 100 || s.speed < 0 || s.speed > 200 ||
       s.hp < 0 || s.hp > 100 || !Number.isSafeInteger(s.damageAck) || s.damageAck < 0 || s.damageAck > p.damageTotal ||
@@ -56,7 +59,8 @@ export class Rooms {
     if (p.hp <= 0 && s.hp > 0 && s.damageAck === p.damageTotal) p.protectedUntil = now + 3000;
     Object.assign(p, { x: s.x, z: s.z, heading: s.heading, speed: s.speed, mode: s.mode,
       scene: s.inside ? `home:${p.id}` : s.scene || 'outdoors', emote: s.emote || '',
-      hp: Math.max(0, s.hp - (p.damageTotal - s.damageAck)), armed: s.armed, seq: data.seq, at: now });
+      hp: Math.max(0, s.hp - (p.damageTotal - s.damageAck)), armed: s.armed, seq: data.seq, at: now,
+      weapon: s.weapon ?? 0, companion: c ? { id:c.id,x:c.x,z:c.z,heading:c.heading } : null });
   }
   chat(p, value, now = Date.now()) {
     if (typeof value !== 'string') this.fail('메시지를 입력하세요.');
@@ -75,22 +79,24 @@ export class Rooms {
     const b = this.rooms.get(a.room)?.members.get(data.target), gun = data.kind === 'gun';
     if (!b || b === a || a.scene !== b.scene || a.scene.startsWith('home:') || a.hp <= 0 || b.hp <= 0 ||
       !b.socket || now - b.at > 12000 || a.protectedUntil > now || b.protectedUntil > now || (gun && !a.armed)) this.fail('지금 공격할 수 없는 대상입니다.', 409);
+    const profile = [{range:65,damage:35,interval:300},{range:75,damage:28,interval:120},{range:85,damage:32,interval:160},{range:110,damage:85,interval:1200}][a.weapon || 0];
     const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > (gun ? 65 : 3.3) || (d > 0 && (Math.sin(a.heading) * dx + Math.cos(a.heading) * dz) / d < (gun ? 0.75 : 0.1))) this.fail('사거리 밖입니다.', 409);
+    if (d > (gun ? profile.range : 3.3) || (d > 0 && (Math.sin(a.heading) * dx + Math.cos(a.heading) * dz) / d < (gun ? 0.75 : 0.1))) this.fail('사거리 밖입니다.', 409);
     if (a.scene === 'outdoors') for (let t = 0.5; t < d; t += 0.7) {
       const x = a.x + dx * t / d, z = a.z + dz * t / d;
       if ([-100, -40, 40, 100].some(v => Math.abs(x - v) < 15.5) && [-96, -36, 36, 96].some(v => Math.abs(z - v) < 17.5)) this.fail('대상이 가려져 있습니다.', 409);
     }
-    if (now - a.lastAttack < (gun ? 250 : 450)) this.fail('다음 공격을 기다려 주세요.', 429);
+    if (now - a.lastAttack < (gun ? profile.interval : 450)) this.fail('다음 공격을 기다려 주세요.', 429);
     a.lastAttack = now; a.hits.set(data.attackId, now);
-    const amount = Math.min(b.hp, gun ? 35 : 25);
+    const amount = Math.min(b.hp, gun ? profile.damage : 25);
     b.hp -= amount; b.damageTotal += amount;
   }
   snapshot(p, after = 0) {
     const room = this.rooms.get(p.room);
-    return { type: 'snapshot', peers: [...room.members.values()].filter(b => b !== p && b.socket && !b.scene.startsWith('home:')).map(b => ({
+    return { type: 'snapshot', peers: [...room.members.values()].filter(b => b !== p && b.socket).map(b => ({
       id: b.id, name: b.name, scene: b.scene, x: b.x, z: b.z, heading: b.heading, speed: b.speed,
-      mode: b.mode, emote: b.emote, hp: b.hp, at: b.at,
+      mode: b.mode, emote: b.emote, hp: b.hp, at: b.at, weapon: b.weapon,
+      companion: b.scene === 'outdoors' ? b.companion : null,
     })), vitals: { hp: p.hp, damageTotal: p.damageTotal }, messages: room.messages.filter(m => m.id > after), count: [...room.members.values()].filter(b => b.socket).length };
   }
 }

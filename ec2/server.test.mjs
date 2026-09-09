@@ -57,7 +57,11 @@ test('EC2 HTTP, WebSocket rooms, combat, chat, reconnect and client transport', 
     const rb = await resumed.wait(m => m.type === 'joined'); assert.equal(rb.id, bb.id); assert.equal(rb.resumed, true);
     await resumed.wait(m => m.type === 'snapshot' && m.vitals.damageTotal === 35);
     resumed.send({ op: 'sync', seq: 3, state: { ...state, hp: 65, damageAck: 35, inside: true } });
-    await a.wait(m => m.type === 'snapshot' && m.peers.length === 0);
+    await a.wait(m => m.type === 'snapshot' && m.peers.some(p => p.id === bb.id && p.scene.startsWith('home:')));
+    resumed.send({op:'sync',seq:4,state:{...state,hp:65,damageAck:35,companion:{id:2,x:1,z:2,heading:0},weapon:3}});
+    await a.wait(m=>m.type==='snapshot' && m.peers.some(p=>p.id===bb.id && p.weapon===3 && p.companion?.id===2));
+    resumed.send({op:'sync',seq:5,state:{...state,companion:{id:2,x:999,z:0,heading:0}},requestId:'bad-companion'});
+    await resumed.wait(m=>m.type==='error' && m.requestId==='bad-companion');
 
     // Execute the actual browser transport against the actual server.
     const source = ts.transpileModule(readFileSync(new URL('../app/multiplayer-socket.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
