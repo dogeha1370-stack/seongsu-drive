@@ -1,0 +1,83 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import WebSocket from 'ws';
+import { randomUUID } from 'node:crypto';
+import { createGameServer } from './server.mjs';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+
+test('EC2 HTTP, WebSocket rooms, combat, chat, reconnect and client transport', async () => {
+  const game = createGameServer({ origins: ['http://localhost:3000'] });
+  game.server.listen(0, '127.0.0.1'); await once(game.server, 'listening');
+  const base = `http://127.0.0.1:${game.server.address().port}`;
+  const clients = [];
+  async function client() {
+    const ws = new WebSocket(base.replace('http:', 'ws:') + '/ws', { origin: 'http://localhost:3000' });
+    clients.push(ws);
+    const queue = []; ws.on('message', d => queue.push(JSON.parse(d.toString())));
+    await once(ws, 'open');
+    return { ws, send: data => ws.send(JSON.stringify(data)), async wait(predicate) {
+      const end = Date.now() + 3000;
+      while (Date.now() < end) { const i = queue.findIndex(predicate); if (i >= 0) return queue.splice(i, 1)[0]; await new Promise(r => setTimeout(r, 10)); }
+      throw new Error('Timed out waiting for message');
+    } };
+  }
+  let transport;
+  try {
+    assert.equal((await fetch(base + '/')).status, 200);
+    assert.match(await (await fetch(base + '/')).text(), /성수 드라이브/);
+    assert.equal((await fetch(base + '/ec2/server.mjs')).status, 404);
+    assert.equal((await fetch(base + '/healthz')).status, 200);
+    const bad = new WebSocket(base.replace('http:', 'ws:') + '/ws', { origin: 'https://evil.example' });
+    await new Promise(resolve => bad.on('unexpected-response', (_req, res) => { assert.equal(res.statusCode, 403); res.resume(); bad.on('error', () => {}); bad.terminate(); resolve(); }));
+    const a = await client(), b = await client(), c = await client();
+    a.send({ op: 'join', name: '가', createRoom: true }); const aa = await a.wait(m => m.type === 'joined');
+    assert.match(aa.room, /^[A-Z2-9]{8}$/);
+    b.send({ op: 'join', name: '나', room: aa.room }); const bb = await b.wait(m => m.type === 'joined');
+    c.send({ op: 'join', name: '다' }); await c.wait(m => m.type === 'joined');
+    const state = { x: 0, z: 0, heading: 0, speed: 0, hp: 100, damageAck: 0, armed: true, inside: false, mode: 'walk', emote: '', scene: 'outdoors' };
+    a.send({ op: 'sync', seq: 1, state }); b.send({ op: 'sync', seq: 1, state: { ...state, z: 2 } });
+    await a.wait(m => m.type === 'snapshot' && m.peers.some(p => p.id === bb.id && p.z === 2));
+    assert.equal((await c.wait(m => m.type === 'snapshot')).peers.length, 0);
+    a.send({ op: 'chat', text: '배달 가자', requestId: 'chat' }); await a.wait(m => m.type === 'ack' && m.requestId === 'chat');
+    await b.wait(m => m.type === 'snapshot' && m.messages.some(m => m.text === '배달 가자'));
+    assert.equal((await c.wait(m => m.type === 'snapshot')).messages.length, 0);
+    // Remove the initial grace period without waiting in the test.
+    for (const p of game.rooms.sessions.values()) p.protectedUntil = 0;
+    const attack = { op: 'attack', target: bb.id, kind: 'gun', attackId: randomUUID(), requestId: 'hit' };
+    a.send(attack); await a.wait(m => m.type === 'ack' && m.requestId === 'hit');
+    await b.wait(m => m.type === 'snapshot' && m.vitals.hp === 65 && m.vitals.damageTotal === 35);
+    a.send({ ...attack, requestId: 'duplicate' }); await a.wait(m => m.type === 'ack' && m.requestId === 'duplicate');
+    b.send({ op: 'sync', seq: 2, state: { ...state, z: 2, hp: 65, damageAck: 35 } });
+    b.send({ op: 'sync', seq: 1, state, requestId: 'replay' }); await b.wait(m => m.type === 'error' && m.requestId === 'replay');
+    b.send({ op: 'sync', seq: 3, state: { ...state, damageAck: 999 }, requestId: 'invalidAck' }); await b.wait(m => m.type === 'error' && m.requestId === 'invalidAck');
+    b.ws.close(); await once(b.ws, 'close');
+    const resumed = await client(); resumed.send({ op: 'join', token: bb.token, room: aa.room });
+    const rb = await resumed.wait(m => m.type === 'joined'); assert.equal(rb.id, bb.id); assert.equal(rb.resumed, true);
+    await resumed.wait(m => m.type === 'snapshot' && m.vitals.damageTotal === 35);
+    resumed.send({ op: 'sync', seq: 3, state: { ...state, hp: 65, damageAck: 35, inside: true } });
+    await a.wait(m => m.type === 'snapshot' && m.peers.length === 0);
+
+    // Execute the actual browser transport against the actual server.
+    const source = ts.transpileModule(readFileSync(new URL('../app/multiplayer-socket.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const { connectSocketGuests } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+    globalThis.location = new URL(base);
+    globalThis.WebSocket = class extends WebSocket { constructor(url) { super(url, { origin: 'http://localhost:3000' }); } };
+    let connection, messages = [];
+    transport = connectSocketGuests(() => state, c => { connection = c; }, () => {}, () => {}, m => { messages = m; });
+    await transport.join({ name: '실제클라이언트', room: aa.room });
+    for (let i = 0; i < 100 && connection?.status !== 'online'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(connection.status, 'online');
+    await transport.sendChat('전송 확인');
+    for (let i = 0; i < 100 && !messages.some(m => m.text === '전송 확인'); i++) await new Promise(r => setTimeout(r, 20));
+    assert.ok(messages.some(m => m.text === '전송 확인'));
+    const connected = [...game.rooms.sessions.values()].find(p => p.name === '실제클라이언트');
+    const oldSocket = connected.socket;
+    oldSocket.terminate();
+    for (let i = 0; i < 150 && (!connected.socket || connected.socket === oldSocket); i++) await new Promise(r => setTimeout(r, 20));
+    assert.ok(connected.socket && connected.socket !== oldSocket, 'browser transport automatically resumes same session');
+    assert.equal([...game.rooms.sessions.values()].filter(p => p.name === '실제클라이언트').length, 1);
+    assert.ok(game.rooms.sessions.size >= 4);
+  } finally { transport?.dispose(); for (const ws of clients) ws.terminate(); await game.close(); }
+});

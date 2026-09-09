@@ -13,7 +13,8 @@ export function sampleMotion(
   if (samples.length < 2) return last;
   const previous = samples[samples.length - 2];
   const gap = Math.max(1, last.at - previous.at);
-  const delay = Math.min(450, Math.max(180, gap * 1.1));
+  const realtime = typeof __EC2__ !== 'undefined' && __EC2__;
+  const delay = realtime ? Math.min(180, Math.max(75, gap * 1.5)) : Math.min(450, Math.max(180, gap * 1.1));
   const time = now - delay;
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1],

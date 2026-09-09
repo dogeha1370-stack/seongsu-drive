@@ -1,0 +1,25 @@
+[Unit]
+Description=Seongsu Drive HTTP and WebSocket server
+After=network.target
+
+[Service]
+Type=simple
+User=seongsu
+Group=seongsu
+WorkingDirectory=/opt/seongsu-drive
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+Environment=ALLOWED_ORIGINS=https://game.h57studio.com
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/node /opt/seongsu-drive/ec2/server.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,4 @@
+import { connectSocketGuests } from './multiplayer-socket';
 export type Peer = {
   id: string;
   name: string;
@@ -52,6 +53,8 @@ export function connectGuests(
   damage: (amount: number) => void = () => {},
   chat: (messages: ChatMessage[]) => void = () => {},
 ) {
+  if (typeof __EC2__ !== 'undefined' && __EC2__)
+    return connectSocketGuests(snapshot, change, peers, damage, chat);
   let damageSeen = 0,
     messageAfter = 0;
   let history: ChatMessage[] = [];

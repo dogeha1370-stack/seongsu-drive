@@ -1,0 +1,16 @@
+import { mkdirSync, cpSync, copyFileSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+const root = resolve(import.meta.dirname, '..');
+const stage = resolve(root, 'work', 'ec2-release-' + Date.now());
+mkdirSync(resolve(stage, 'ec2'), { recursive: true });
+cpSync(resolve(root, 'dist-ec2/client'), resolve(stage, 'dist-ec2/client'), { recursive: true });
+for (const f of ['server.mjs', 'rooms.mjs']) copyFileSync(resolve(root, 'ec2', f), resolve(stage, 'ec2', f));
+for (const f of ['package.json', 'package-lock.json']) copyFileSync(resolve(root, 'ec2', f), resolve(stage, f));
+cpSync(resolve(root, 'deploy'), resolve(stage, 'deploy'), { recursive: true });
+copyFileSync(resolve(root, 'EC2-DEPLOY.md'), resolve(stage, 'EC2-DEPLOY.md'));
+const lock = JSON.parse(readFileSync(resolve(stage, 'package-lock.json'), 'utf8'));
+if (lock.packages[''].dependencies.ws !== '8.21.3') throw new Error('Runtime lock mismatch');
+const archive = resolve(root, 'work/seongsu-drive-ec2.tar.gz');
+execFileSync('tar', ['-czf', archive, '-C', stage, '.'], { stdio: 'inherit' });
+console.log(archive);

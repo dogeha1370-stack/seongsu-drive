@@ -1,5 +1,18 @@
 # 성수 드라이브
 
+## EC2 배포
+
+EC2 전체 배포용 Node.js 서버와 WebSocket 멀티플레이를 제공합니다. **[EC2-DEPLOY.md](./EC2-DEPLOY.md)**의 순서대로 배포하세요.
+
+```sh
+npm ci
+npm run build:ec2
+npm run test:ec2
+npm run start:ec2
+```
+
+로컬 주소는 `http://localhost:3000`입니다. `npm run package:ec2`로 빌드된 파일과 최소 서버 의존성만 포함한 `work/seongsu-drive-ec2.tar.gz`를 생성합니다. 기존 `npm run build`/`npm run dev`는 Sites용입니다. 아래 HTTP·D1 관련 설명은 기존 Sites 버전에 해당하며, EC2 버전은 `/ws` 연결과 방별 메모리를 사용합니다.
+
 성수동을 모티브로 만든 3D 생활·운전 샌드박스 게임입니다. 현금 0원과 반지하에서 시작해 배달과 아르바이트로 돈을 벌고, 차량을 타고 동네를 탐험합니다. 월세는 300,000원, 첫 납부까지 7일입니다.
 
 ## 플레이
