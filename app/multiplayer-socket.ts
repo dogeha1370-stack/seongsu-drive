@@ -47,8 +47,10 @@ export function connectSocketGuests(
     y?: number;
     train?: boolean;
   }) => void = () => {};
+  let duel:Connection['duel']=null,offer:Connection['offer']=null,lossSeen=0;
+  let onDuelLoss=()=>{};
   const report = (status: Connection['status'], error = '', count = 0) =>
-    change({ status, error, count, name, room, admin });
+    change({ status, error, count, name, room, admin,duel,offer });
   const send = (data: unknown) => {
     if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 65536)
       return false;
@@ -115,6 +117,7 @@ export function connectSocketGuests(
         return;
       }
       if (data.type === 'joined') {
+        if(!data.resumed){lossSeen=0;duel=offer=null;}
         if (!data.resumed) {
           damageSeen = 0;
           after = 0;
@@ -135,6 +138,8 @@ export function connectSocketGuests(
         report('online', '', 1);
       } else if (data.type === 'snapshot' && ready) {
         admin = data.admin === true;
+        duel=data.duel;offer=data.offer;
+        if((data.losses||0)>lossSeen){lossSeen=data.losses;onDuelLoss();}
         if (data.vitals.damageTotal > damageSeen) {
           const amount = data.vitals.damageTotal - damageSeen;
           damageSeen = data.vitals.damageTotal;
@@ -213,6 +218,8 @@ export function connectSocketGuests(
     });
   }
   return {
+    onDuelLoss:(callback:()=>void)=>{onDuelLoss=callback;},
+    duel:(op:string,target?:string)=>command('duel-'+op,{target}),
     onTeleport: (callback: typeof onTeleport) => {
       onTeleport = callback;
     },

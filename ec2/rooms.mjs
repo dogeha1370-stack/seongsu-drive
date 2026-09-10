@@ -24,7 +24,7 @@ export class Rooms {
       name: requested || `성수산책가-${String(randomInt(10000)).padStart(4, '0')}`,
       x: -40, z: -69, heading: 0, speed: 0, mode: 'walk', scene: 'outdoors', emote: '',
       hp: 100, damageTotal: 0, armed: false, seq: 0, at: now, protectedUntil: now + 3000,
-      lastAttack: 0, lastChat: 0, hits: new Map(), socket, weapon: 0, companion: null };
+      duel:null, offer:null, losses:0, lastInvite:0, lastAttack: 0, lastChat: 0, hits: new Map(), socket, weapon: 0, companion: null };
     room.members.set(p.id, p); this.sessions.set(p.token, p);
     return p;
   }
@@ -35,6 +35,7 @@ export class Rooms {
     return p;
   }
   leave(p, now = Date.now()) {
+    this.endDuel(p);
     this.sessions.delete(p.token);
     const room = this.rooms.get(p.room);
     room?.members.delete(p.id);
@@ -49,6 +50,8 @@ export class Rooms {
     if (s?.weapon !== undefined && (!Number.isInteger(s.weapon) || s.weapon < 0 || s.weapon > 3)) this.fail('잘못된 무기입니다.');
     if(s?.y!==undefined&&(!Number.isFinite(s.y)||s.y<0||s.y>20))this.fail('잘못된 높이입니다.');
     if(s?.train!==undefined&&typeof s.train!=='boolean')this.fail('잘못된 탑승 정보입니다.');
+    if(s?.seated!==undefined&&typeof s.seated!=='boolean')this.fail('잘못된 착석 상태입니다.');
+    if(s?.worn!==undefined&&!['','blue','cream','black'].includes(s.worn))this.fail('잘못된 의상입니다.');
     const c = s?.companion;
     if (c != null && (!Number.isInteger(c.id) || c.id < 0 || c.id > 200 || ![c.x,c.z,c.heading].every(Number.isFinite) || Math.abs(c.x)>115 || Math.abs(c.z)>115 || Math.abs(c.heading)>100)) this.fail('잘못된 동행 정보입니다.');
     if (!s || ![s.x, s.z, s.heading, s.speed, s.hp].every(Number.isFinite) ||
@@ -59,7 +62,7 @@ export class Rooms {
       !['', '👋', '😄', '배달 가자!', '잠깐만!'].includes(s.emote || '') ||
       !Number.isSafeInteger(data.seq) || data.seq <= p.seq) this.fail('위치 정보가 올바르지 않습니다.');
     if (p.hp <= 0 && s.hp > 0 && s.damageAck === p.damageTotal) p.protectedUntil = now + 3000;
-    Object.assign(p, { train:!!s.train, y:s.y||0, x: s.x, z: s.z, heading: s.heading, speed: s.speed, mode: s.mode,
+    Object.assign(p, { seated:!!s.seated,worn:s.worn||'',train:!!s.train, y:s.y||0, x: s.x, z: s.z, heading: s.heading, speed: s.speed, mode: s.mode,
       scene: s.inside ? `home:${p.id}` : s.scene || 'outdoors', emote: s.emote || '',
       hp: Math.max(0, s.hp - (p.damageTotal - s.damageAck)), armed: s.armed, seq: data.seq, at: now,
       weapon: s.weapon ?? 0, companion: c ? { id:c.id,x:c.x,z:c.z,heading:c.heading } : null });
@@ -73,6 +76,26 @@ export class Rooms {
     const room = this.rooms.get(p.room);
     room.messages.push({ id: ++this.messageId, sender: p.id, name: p.name, text, at: now });
     room.messages = room.messages.slice(-60);
+  }
+  endDuel(p){
+    const other=this.rooms.get(p.room)?.members.get(p.duel?.target);
+    if(other?.duel?.target===p.id)other.duel=null;
+    p.duel=null;
+  }
+  challenge(p,data,now=Date.now()){
+    if(data.op==='duel-decline'){p.offer=null;return;}
+    if(data.op==='duel-accept'){
+      const offer=p.offer;p.offer=null;
+      const a=this.rooms.get(p.room)?.members.get(offer?.id);
+      if(!a?.socket||!offer||offer.expires<now||a.duel||p.duel||a.hp<=0||p.hp<=0||a.scene!==p.scene||a.scene.startsWith('home:'))this.fail('수락할 수 없는 신청입니다.',409);
+      a.duel={target:p.id,name:p.name,expires:now+180000};p.duel={target:a.id,name:a.name,expires:now+180000};
+      a.protectedUntil=p.protectedUntil=now+3000;return;
+    }
+    const b=this.rooms.get(p.room)?.members.get(data.target);
+    if(!b?.socket||b===p||p.duel||b.duel||p.hp<=0||b.hp<=0||b.scene!==p.scene||p.scene.startsWith('home:'))this.fail('지금 신청할 수 없습니다.',409);
+    if(now-p.lastInvite<10000)this.fail('10초 뒤 다시 신청하세요.',429);
+    if(b.offer&&b.offer.expires>now)this.fail('상대가 다른 신청을 확인 중입니다.',409);
+    p.lastInvite=now;b.offer={id:p.id,name:p.name,expires:now+30000};
   }
   attack(a, data, now = Date.now()) {
     if (!['gun', 'punch'].includes(data.kind) || typeof data.attackId !== 'string' || !/^[-a-f0-9]{36}$/.test(data.attackId)) this.fail('잘못된 공격입니다.');
@@ -92,12 +115,15 @@ export class Rooms {
     a.lastAttack = now; a.hits.set(data.attackId, now);
     const amount = Math.min(b.hp, gun ? profile.damage : 25);
     b.hp -= amount; b.damageTotal += amount;
+    if(b.hp===0&&a.duel?.target===b.id&&b.duel?.target===a.id&&a.duel.expires>now){b.losses++;this.endDuel(a);}
   }
   snapshot(p, after = 0) {
+    if(p.duel&&p.duel.expires<Date.now())this.endDuel(p);
+    if(p.offer&&p.offer.expires<Date.now())p.offer=null;
     const room = this.rooms.get(p.room);
-    return { type: 'snapshot', peers: [...room.members.values()].filter(b => b !== p && b.socket).map(b => ({
+    return { duel:p.duel,offer:p.offer,losses:p.losses,type: 'snapshot', peers: [...room.members.values()].filter(b => b !== p && b.socket).map(b => ({
       id: b.id, name: b.name, scene: b.scene, y:b.y||0, x: b.x, z: b.z, heading: b.heading, speed: b.speed,
-      mode: b.mode, emote: b.emote, hp: b.hp, at: b.at, weapon: b.weapon,
+      seated:!!b.seated,worn:b.worn||'',mode: b.mode, emote: b.emote, hp: b.hp, at: b.at, weapon: b.weapon,
       companion: b.scene === 'outdoors' ? b.companion : null,
     })), vitals: { hp: p.hp, damageTotal: p.damageTotal }, messages: room.messages.filter(m => m.id > after), count: [...room.members.values()].filter(b => b.socket).length };
   }

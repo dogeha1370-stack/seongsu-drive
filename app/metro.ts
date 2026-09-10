@@ -163,7 +163,8 @@ export function createMetro(scene: T.Scene) {
           train,
         );
         doorParts.push({ mesh: door, z: door.position.z, side });
-        box(0.5, 0.45, 2, '#4b82b0', -0.8, 0.85, z + offset, train);
+        box(0.6, 0.18, 2, car===0?'#d592ba':'#4b82b0', -0.8, 0.42, z + offset, train);
+        box(0.12,0.65,2,car===0?'#d592ba':'#4b82b0',-1.13,.78,z+offset,train);
         box(0.07, 2.3, 0.07, '#d1c4a4', 0.8, 1.4, z + offset, train);
       }
     for (const side of [-1, 1])

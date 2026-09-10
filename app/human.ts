@@ -9,6 +9,7 @@ export type HumanRig = {
   knees: T.Bone[];
   pose: (time: number, speed: number, punch: number, down?: boolean) => void;
   ride: (lean: number) => void;
+  sit:()=>void;
 };
 export function createHuman(
   shirt: string,
@@ -184,5 +185,7 @@ export function createHuman(
     }
     hips.rotation.z = lean * 0.3;
   };
-  return { root, hips, head, arms, elbows, legs, knees, pose, ride };
+  const sit=()=>{hips.position.y=.52;hips.rotation.z=0;for(let i=0;i<2;i++){legs[i].rotation.set(-Math.PI/2,0,0);knees[i].rotation.x=Math.PI/2;arms[i].rotation.x=-.4;elbows[i].rotation.x=-.7;}};
+  root.userData.shirtMaterial=material(shirt);
+  return { root, hips, head, arms, elbows, legs, knees, pose, ride,sit };
 }

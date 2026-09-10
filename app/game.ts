@@ -1,3 +1,7 @@
+import {urbanProp} from './urban-props';
+import {createBicycle} from './bicycle';
+import {createSlope,roadHeight,roadGrade} from './terrain';
+import {urbanAction,urbanTick,CLOTHES,VILLAINS,charm,serviceOpen} from './urban';
 import { createMetro, metroFloor, PLATFORM_Y } from './metro';
 import { intersections, signalGreen, signalDistance, onRoad, roadLoop, separateCrowd } from './traffic';
 import { sportsCar } from './vehicles';
@@ -57,6 +61,7 @@ import {
   type Person,
 } from './pedestrians';
 export type Panel =
+  | 'urban'
   | 'friends'
   | 'phone'
   | 'bag'
@@ -110,6 +115,9 @@ export type Hud = {
   error: string;
 };
 export type GameApi = {
+  urban:(op:string,value?:string)=>void;
+  setDuel:(id:string|null)=>void;
+  loseDuel:()=>void;
   teleport: (p: {x:number;z:number;scene:string;heading:number;y?:number;train?:boolean}) => void;
   presence: () => PresenceState;
   onPeerAttack: (callback: (id: string, kind: 'gun' | 'punch') => void) => void;
@@ -359,6 +367,7 @@ export function createGame(
     const lamps=[0,1].map(k=>{const lamp=new T.Mesh(new T.SphereGeometry(.16,8,6),new T.MeshBasicMaterial({color:k?'#35e17d':'#ff443d'}));lamp.position.set(x,4.78-k*.52,z+.25);scene.add(lamp);lamp.userData.dynamic=true;return lamp;});
     housing.name='traffic-signal';trafficSignals.push({vertical,lamps});
   }
+  createSlope(scene);
   const metro=createMetro(scene);
   let metroRiding=false;
   const oliveSign = sign('OLIVE YOUNG', 27, -40, 5.8, 53.6);
@@ -893,12 +902,12 @@ export function createGame(
   controlled.waypoint = 1;
   controlled.cruise = 6;
   controlled.physics.angle = Math.PI / 2;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0, count=6+Math.floor(Math.random()*5); i < count; i++) {
     const route =
       i < 4 ? loop : loop.map((p) => new T.Vector3(p.x, 0, -p.z)).reverse();
-    const index = i % 4,
-      next = (index + 1) % 4,
-      start = route[index].clone().lerp(route[next], 0.25);
+    let index=0,next=1,start=route[0].clone();
+    for(let attempt=0;attempt<80;attempt++){index=Math.floor(Math.random()*4);next=(index+1)%4;start=route[index].clone().lerp(route[next],.12+Math.random()*.7);if(vehicles.every(v=>Math.hypot(v.physics.x-start.x,v.physics.z-start.z)>9))break;}
+    if(vehicles.some(v=>Math.hypot(v.physics.x-start.x,v.physics.z-start.z)<9))continue;
     const heading = Math.atan2(
       route[next].x - start.x,
       route[next].z - start.z,
@@ -912,7 +921,7 @@ export function createGame(
       heading,
       route,
       next,
-      7 + (i % 3),
+      5 + Math.random()*5,
     );
   }
   const patrolCars = vehicles.slice(-2);
@@ -955,7 +964,13 @@ export function createGame(
     noticeTime = 1.7;
   }
 
+  const rentalBike=createBicycle();rentalBike.root.visible=false;scene.add(rentalBike.root);let rentalDistance=0,rentalSpeed=0;
   const playerRig = createHuman('#eee8d5');
+  const metroPassengers=Array.from({length:6},(_,i)=>{const rig=createHuman(['#959fbb','#b59c8b','#8aaca3'][i%3],SKIN_TONES[i%6]);metro.train.add(rig.root);rig.root.name='metro-passenger-'+i;return rig;});
+  const metroVillain=createHuman('#b37e8d',SKIN_TONES[2]);metro.train.add(metroVillain.root);metroVillain.root.name='fictional-metro-villain';
+  const villainProps=VILLAINS.map(v=>{const prop=urbanProp(v.item);metroVillain.arms[1].add(prop);return prop;});
+  const playerProps=VILLAINS.map(v=>{const prop=urbanProp(v.item);prop.visible=false;playerRig.arms[1].add(prop);return prop;});
+  const seatZ=[-15.7,-9.7,-3,3,9.7,15.7];
   const player = playerRig.root;
   player.name = 'player';
   const legs = playerRig.legs;
@@ -1402,13 +1417,14 @@ export function createGame(
     materials.forEach((m) => m.dispose());
     guests.delete(id);
   }
+  let duelTarget:string|null=null,friendStayRequested=false;
   let peerAttack: (id: string, kind: 'gun' | 'punch') => void = () => {};
   const currentScene = () =>
     buildingFloor !== null
       ? 'office:' + buildingFloor
       : life.inside
         ? 'home'
-        : player.position.y>2 ? 'metro' : 'outdoors';
+        : (metroRiding||metroFloor(player.position.x,player.position.z)!==null) ? 'metro' : 'outdoors';
   function setPeers(peers: Peer[]) {
     const ids = new Set(peers.map((p) => p.id));
     for (const id of guests.keys()) if (!ids.has(id)) removeGuest(id);
@@ -1511,13 +1527,15 @@ export function createGame(
         (p.hp ?? 100) <= 0,
       );
       if (p.mode === 'bike') g.rig.ride(0);
+      if(p.seated&&p.scene==='metro'&&(p.hp??100)>0)g.rig.sit();
+      g.rig.root.userData.shirtMaterial.color.set(CLOTHES.find(c=>c.id===p.worn)?.color||'#8fabc5');
       g.label.position.set(
         root.position.x,
         root.position.y + 3.1,
         root.position.z,
       );
       if (g.vehicle) {
-        g.vehicle.position.set(root.position.x, 0, root.position.z);
+        g.vehicle.position.set(root.position.x, roadHeight(root.position.x,root.position.z), root.position.z);
         g.vehicle.rotation.y = root.rotation.y;
         g.vehicle.userData.animateWheels?.(motion.speed/3.6*_dt);
         g.vehicle.userData.animateBike?.((elapsed * motion.speed) / 3.6, 0, 0);
@@ -1534,7 +1552,7 @@ export function createGame(
   let dismissedPlace: PlaceId | null = null,
     previousNearby: PlaceId | null = null;
   const movementAllowed = () =>
-    liftRemaining <= 0 && !typing && (!panel || panel === 'place');
+    life.urban.travel<=0 && liftRemaining <= 0 && !typing && (!panel || panel === 'place');
   function open(next: Panel) {
     if ((paused || hp <= 0) && next) return;
     if (panel === 'place' && next === null) dismissedPlace = nearby;
@@ -1580,10 +1598,11 @@ export function createGame(
     if ((paused || hp <= 0) && action !== 'recover') return;
     life.hp = hp;
     const oldTier = life.bikeTier;
-    const previous = life.logs[0];
+    const previous = life.logs[0],previousMinutes=life.minutes;
     const at = life.inside ? 'home' : nearby;
     say(act(life, action, value, at));
     hp = life.hp;
+    if(action==='work'&&life.minutes>previousMinutes)life.urban.mental=Math.max(0,life.urban.mental-8);
     if (action === 'talk') panel = 'dialogue';
     if (oldTier !== life.bikeTier) {
       bike.add(deliveryBox);
@@ -1823,7 +1842,7 @@ export function createGame(
       say('잠시 뒤에 다시 이야기해 보세요.');
       return;
     }
-    numberRequest = { id, remaining: 3, chance: numberChance(life.cash) };
+    numberRequest = { id, remaining: 3, chance: numberChance(life.cash,charm(life.urban)) };
     npc.wait = 3.2;
     armed = aiming = ads = false;
   }
@@ -1860,7 +1879,7 @@ export function createGame(
         if (!life.contacts.includes(request.id)) life.contacts.push(request.id);
         life.companionId = request.id;
         say(residentName(request.id) + '의 연락처를 받았습니다. 함께 걸어요!');
-      } else say(residentName(request.id) + ': 지금은 괜찮아요. 다음에 봐요.');
+      } else {life.urban.mental=Math.max(0,life.urban.mental-8);say(residentName(request.id) + ': 지금은 괜찮아요. 다음에 봐요.');}
       save();
     }
   }
@@ -1884,7 +1903,7 @@ export function createGame(
         goalName = plan.at as string;
       if (npc.vehicle && npc.state.hp > 0) {
         const route=roadLoop(npc.state.id);
-        if(npc.goal!=='road'||!onRoad(npc.state.x,npc.state.z,.7)) {const index=npc.state.id%4,point=route[index],next=route[(index+1)%4],t=.2+(npc.state.id%7)*.075;npc.state.x=point.x+(next.x-point.x)*t;npc.state.z=point.z+(next.z-point.z)*t;npc.phase=(index+1)%4;}
+        if(npc.goal!=='road'||!onRoad(npc.state.x,npc.state.z,.7)) {const index=npc.state.id%4,point=route[index],next=route[(index+1)%4],t=.15+Math.random()*.65;npc.state.x=point.x+(next.x-point.x)*t;npc.state.z=point.z+(next.z-point.z)*t;npc.phase=(index+1)%4;}
         let target=route[npc.phase%4];if(Math.hypot(target.x-npc.state.x,target.z-npc.state.z)<1.4){npc.phase++;target=route[npc.phase%4];}
         npc.path=[target];npc.goal='road';npc.activity='도로 배달 운행';
         const heading=Math.atan2(target.x-npc.state.x,target.z-npc.state.z);
@@ -1892,7 +1911,7 @@ export function createGame(
         const bikeAhead=people.some(o=>o!==npc&&o.active&&o.vehicle&&o.state.hp>0&&Math.hypot(o.state.x-npc.state.x,o.state.z-npc.state.z)<5&&(o.state.x-npc.state.x)*Math.sin(heading)+(o.state.z-npc.state.z)*Math.cos(heading)>0);
         const desired=ahead||bikeAhead?0:Math.min(5,Math.sqrt(8*Math.max(0,signalDistance(npc.state.x,npc.state.z,heading,Date.now()/1000)-1)));
         npc.state.walkSpeed += (desired-npc.state.walkSpeed)*(1-Math.exp(-3*dt));
-        npc.vehicle.position.set(npc.state.x,0,npc.state.z);npc.vehicle.rotation.y=npc.state.heading;
+        npc.vehicle.position.set(npc.state.x,roadHeight(npc.state.x,npc.state.z),npc.state.z);npc.vehicle.rotation.y=npc.state.heading;
         continue;
       }
       if (npc.role === '배달기사') {
@@ -2143,7 +2162,6 @@ export function createGame(
       return;
     }
     life.ammo--;
-    crime(2, true);
     shotCooldown = WEAPONS[weapon].cooldown;
     shotTime = 0.08;
     player.rotation.y = yaw + orbit + Math.PI;
@@ -2211,6 +2229,7 @@ export function createGame(
       speed * 0.006 +
       (100 - hp) * 0.00025 +
       (life.caffeine >= 3 ? 0.035 : 0) +
+      (life.urban.mental<20?.012:0) +
       recoil -
       (life.focus > 0 ? 0.002 : 0) -
       Math.min(0.003, stableAim * 0.001);
@@ -2295,6 +2314,7 @@ export function createGame(
           vehicleTarget = null;
         }
       }
+    if (peerVictim ? peerVictim!==duelTarget : !duelTarget||victim||vehicleTarget) crime(2,true);
     if (peerVictim) peerAttack(peerVictim, 'gun');
     if (victim) {
       damagePerson(victim.state, WEAPONS[weapon].damage);
@@ -2361,6 +2381,7 @@ export function createGame(
     return false;
   }
   function attack() {
+    if(metroRiding&&life.urban.villain!==null&&!paused&&!typing&&hp>0){life.hp=hp;const result=urbanAction(life,'fight','',{at:nearby,riding:true});hp=life.hp;attackTime=.28;life.urban.notice=result;say(result);save();return;}
     if (buildingFloor !== null) return;
     if (armed) {
       shoot();
@@ -2383,7 +2404,7 @@ export function createGame(
       0,
       Math.cos(player.rotation.y),
     );
-    let hit = false;
+    let hit = false,duelHit=false;
     for (const v of vehicles) {
       const delta = v.mesh.position.clone().sub(player.position);
       const distance = delta.length();
@@ -2418,6 +2439,7 @@ export function createGame(
         )
         .sort((a, b) => a.delta.lengthSq() - b.delta.lengthSq())[0];
       if (target) {
+        duelHit=target.id===duelTarget;
         peerAttack(target.id, 'punch');
         hit = true;
       }
@@ -2442,10 +2464,10 @@ export function createGame(
       if (candidates.length) {
         const target = candidates[0].p.state;
         hit = hitPerson(target, dir.x, dir.z, 5.5);
-        if (hit) damagePerson(target, 25);
+        if (hit) damagePerson(target, 25+(life.urban.buff==='power'?15:0)+(life.urban.equipped==='등산 스틱'?15:life.urban.equipped==='단소'?10:0));
       }
     }
-    if (hit) crime(1);
+    if (hit && !duelHit){crime(1);life.urban.mental=Math.max(0,life.urban.mental-2);}
     if (noticeTime < 1.5) {
       notice = hit ? '타격!' : '주먹 공격';
       noticeTime = 0.6;
@@ -2453,7 +2475,8 @@ export function createGame(
   }
   function interact() {
     if(!life.inside && buildingFloor===null && player.position.y>9 && !paused && !typing && hp>0){
-      if(metroRiding){if(metro.state.doors){metroRiding=false;player.position.set(5.5,PLATFORM_Y,metro.state.z);say('내렸습니다.');}else say('열차가 정차하면 내릴 수 있습니다.');}
+      if(metroRiding){if(metro.state.doors){metroRiding=false;life.urban.seat=null;player.position.set(5.5,PLATFORM_Y,metro.state.z);say('내렸습니다.');}else say('열차가 정차하면 내릴 수 있습니다.');}
+      else if(!serviceOpen(life.minutes)){say('막차가 끝났습니다 · 휴대폰 생활 탭에서 귀가 방법을 선택하세요.');}
       else if(metro.state.doors&&Math.abs(player.position.z-metro.state.z)<18&&player.position.x<7.6){metroRiding=true;armed=false;gun.visible=false;panel=null;clear();say('2호선에 탑승했습니다.');}
       else say('승강장에서 열차가 정차할 때까지 기다려 주세요.');
       return;
@@ -2667,7 +2690,8 @@ export function createGame(
       v.mesh.scale.set(1, 1, 1);
       v.fire.visible = false;
       Object.assign(v.physics, v.spawn);
-      v.mesh.position.set(v.physics.x, 0, v.physics.z);
+      v.mesh.position.set(v.physics.x, roadHeight(v.physics.x,v.physics.z), v.physics.z);
+      v.mesh.rotation.x=-Math.atan(roadGrade(v.physics.x,v.physics.z,v.physics.angle));
       v.mesh.rotation.set(0, v.physics.angle, 0);
       if (v.route.length) {
         v.waypoint = (((vehicles.indexOf(v) - 1) % 4) + 1) % 4;
@@ -2703,7 +2727,7 @@ export function createGame(
   }[] = [];
   function explode(v: Vehicle) {
     v.exploded = true;
-    v.respawnTime = 10;
+    v.respawnTime = 10+Math.random()*20;
     v.fire.visible = false;
     v.mesh.scale.y = 0.35;
     v.physics.vx = v.physics.vz = v.physics.spin = 0;
@@ -3201,7 +3225,7 @@ export function createGame(
       }
       p.mesh.position.set(
         p.state.x,
-        Math.sin(p.state.lean) * 0.3 + (p.vehicle && p.wait <= 0 ? 0.35 : 0),
+        roadHeight(p.state.x,p.state.z)+Math.sin(p.state.lean) * 0.3 + (p.vehicle && p.wait <= 0 ? 0.35 : 0),
         p.state.z,
       );
       p.mesh.rotation.set(p.state.lean, p.state.heading, 0);
@@ -3284,8 +3308,10 @@ export function createGame(
       if (k === 'r') reload();
     }
   }
+  let touchCameraId:number|null=null;
   const down = (e: PointerEvent) => {
-    if (e.pointerType !== 'touch' || paused || !movementAllowed()) return;
+    if (e.pointerType !== 'touch' || touchCameraId!==null || paused || !movementAllowed()) return;
+    touchCameraId=e.pointerId;
     e.preventDefault();
     drag = true;
     px = e.clientX;
@@ -3293,7 +3319,7 @@ export function createGame(
     renderer.domElement.setPointerCapture(e.pointerId);
   };
   const move = (e: PointerEvent) => {
-    if (e.pointerType !== 'touch' || !drag) return;
+    if (e.pointerType !== 'touch' || e.pointerId!==touchCameraId || !drag) return;
     orbit -= (e.clientX - px) * (aiming ? 0.004 : 0.007);
     pitch = T.MathUtils.clamp(
       pitch + (e.clientY - py) * (aiming ? 0.003 : 0.005),
@@ -3304,11 +3330,11 @@ export function createGame(
     py = e.clientY;
   };
   const up = (e: PointerEvent) => {
-    if (e.pointerType === 'touch') drag = false;
+    if (e.pointerType === 'touch'&&e.pointerId===touchCameraId){drag=false;touchCameraId=null;}
   };
   const contextMenu = (e: MouseEvent) => e.preventDefault();
   const lostCapture = () => {
-    drag = false;
+    touchCameraId=null;drag = false;
   };
   const mouseDown = (e: MouseEvent) => {
     if (e.button === 0) {
@@ -3407,7 +3433,15 @@ export function createGame(
       dt = Math.min(realDt, 0.045);
     last = now;
     metro.update(Date.now()/1000);
-    if(metroRiding){player.position.set(1.8,PLATFORM_Y,metro.state.z);speed=0;}
+    if(metroRiding){const seat=life.urban.seat;player.position.lerp(new T.Vector3(seat===null?1.8:1,PLATFORM_Y,metro.state.z+(seat===null?0:seatZ[seat])),1-Math.exp(-dt*20));speed=0;if(seat!==null){player.rotation.y=Math.PI/2;playerRig.sit();}}
+    metroPassengers.forEach((rig,i)=>{rig.root.visible=life.urban.occupied.includes(i);rig.root.position.set(-.8,0,seatZ[i]);rig.root.rotation.y=Math.PI/2;rig.pose(elapsed,0,0);rig.sit();if(life.urban.seat!==null&&life.urban.seat<2)rig.head.rotation.y=-.7;});
+    metroVillain.root.visible=metroRiding&&life.urban.villain!==null;
+    if(life.urban.villain!==null){const index=life.urban.villain;metroVillain.root.userData.name=VILLAINS[index].name;metroVillain.root.userData.shirtMaterial.color.set(['#876fbd','#639697','#b09c63','#853a43','#4c8ca5','#a7a284','#65846c','#aa78a1'][index]);villainProps.forEach((prop,i)=>prop.visible=i===index);}metroVillain.root.position.set(.5,0,5);metroVillain.root.rotation.y=Math.PI;metroVillain.pose(elapsed,life.urban.villain===4?1:0,life.urban.combatCooldown>0?.8:0);
+    playerProps.forEach((prop,i)=>prop.visible=life.urban.equipped===VILLAINS[i].item&&!armed&&!riding&&!driving&&hp>0);
+    playerRig.root.userData.shirtMaterial?.color.set(CLOTHES.find(c=>c.id===life.urban.worn)?.color||'#eee8d5');
+    if(!paused&&hp>0){life.hp=hp;urbanTick(life,dt,metroRiding,nearby);hp=life.hp;
+      if(life.urban.travel>0){life.urban.travel=Math.max(0,life.urban.travel-dt);if(life.urban.travel===0){leaveHome();player.position.set(-40,0,-69);riding=driving=false;player.visible=true;say('택시로 집 앞에 도착했습니다.');}}
+    }
     if (!paused) hurtTimer = Math.max(0, hurtTimer - dt);
     if (!paused && hp > 0) {
       life.hp = hp;
@@ -3517,6 +3551,7 @@ export function createGame(
           life.fuel > 0 && life.bikeHp > 0
             ? BIKES[life.bikeTier].speed + (life.bikeTune ? 3 : 0)
             : 0;
+        bikeMotion.velocity-=roadGrade(player.position.x,player.position.z,bikeMotion.heading)*5*dt;
         const delta = stepBike(bikeMotion, f, turn, !!keys[' '], maximum, dt);
         const before = player.position.clone();
         let impact = false;
@@ -3545,10 +3580,10 @@ export function createGame(
           }
         }
         speed = Math.abs(bikeMotion.velocity);
-        player.position.y = 0.22;
+        player.position.y = .22+roadHeight(player.position.x,player.position.z);
         player.rotation.y = bikeMotion.heading;
         player.rotation.z = bikeMotion.lean;
-        bike.position.set(player.position.x, 0, player.position.z);
+        bike.position.set(player.position.x, roadHeight(player.position.x,player.position.z), player.position.z);
         bike.rotation.y = bikeMotion.heading;
         bike.userData.animateBike?.(
           bikeMotion.travel,
@@ -3582,7 +3617,7 @@ export function createGame(
       if (!driving && !riding && !metroRiding) {
         player.rotation.z = 0;
         jumpVelocity -= 18 * dt;
-        const groundY = buildingFloor !== null ? (buildingFloor - 1) * 5 : !life.inside ? (metroFloor(player.position.x,player.position.z) ?? 0) : 0;
+        const groundY = buildingFloor !== null ? (buildingFloor - 1) * 5 : !life.inside ? (metroFloor(player.position.x,player.position.z) ?? roadHeight(player.position.x,player.position.z)) : 0;
         player.position.y = Math.max(
           groundY,
           player.position.y + jumpVelocity * dt,
@@ -3601,12 +3636,13 @@ export function createGame(
               ? 2.5
               : aiming
                 ? 2.5
-                : keys.shift
-                  ? 9
-                  : 5;
+                : (keys.shift ? 9 : 5) * (life.urban.rental>0?1.7:life.urban.boost>0?1.12:1) * (life.urban.toilet>0?.85:1);
+        const rentalActive=life.urban.rental>0&&!life.inside&&buildingFloor===null;
+        rentalSpeed=T.MathUtils.damp(rentalSpeed,len?v:0,len?2:5,dt);
+        const moveSpeed=rentalActive?rentalSpeed:v;
         if (len) {
-          const nx = player.position.x + (dx / len) * v * Math.min(1, len) * dt,
-            nz = player.position.z + (dz / len) * v * Math.min(1, len) * dt;
+          const nx = player.position.x + (dx / len) * moveSpeed * Math.min(1, len) * dt,
+            nz = player.position.z + (dz / len) * moveSpeed * Math.min(1, len) * dt;
           if (!playerBlocked(nx, player.position.z, riding ? 0.85 : 0.5))
             player.position.x = nx;
           else if (riding) life.bikeHp = Math.max(0, life.bikeHp - dt * 6);
@@ -3617,7 +3653,7 @@ export function createGame(
           legs[0].rotation.x = Math.sin(elapsed * 12) * 0.6;
           legs[1].rotation.x = -legs[0].rotation.x;
         } else legs.forEach((l) => (l.rotation.x = 0));
-        speed = len ? v * Math.min(1, len) : 0;
+        speed = len ? moveSpeed * Math.min(1, len) : 0;
         if (
           life.inside &&
           Math.abs(player.position.x - 300) < 0.7 &&
@@ -3658,6 +3694,9 @@ export function createGame(
         attackTime > 0 ? Math.sin((1 - attackTime / 0.28) * Math.PI) : 0;
       playerRig.pose(elapsed, driving || riding ? 0 : speed, punch);
       if (riding) playerRig.ride(bikeMotion.lean);
+      rentalBike.root.visible=life.urban.rental>0&&!life.inside&&!riding&&!driving&&!metroRiding&&buildingFloor===null&&hp>0;
+      if(rentalBike.root.visible){rentalDistance+=speed*dt;rentalBike.root.position.copy(player.position);rentalBike.root.rotation.y=player.rotation.y;rentalBike.animate(rentalDistance);playerRig.ride(0);playerRig.legs.forEach((leg,i)=>leg.rotation.x+=Math.sin(rentalDistance*3+i*Math.PI)*.3);}
+      if(metroRiding&&life.urban.seat!==null)playerRig.sit();
       shotCooldown = Math.max(0, shotCooldown - dt);
       if (triggerHeld && armed && (weapon === 1 || weapon === 2) && !shotCooldown && life.ammo > 0) shoot();
       shotTime = Math.max(0, shotTime - dt);
@@ -3676,7 +3715,7 @@ export function createGame(
       crimeCheck -= dt;
       if (crimeCheck <= 0) {
         crimeCheck = 2;
-        if (armed) crime(1);
+        if (armed && !duelTarget) crime(1);
       }
       gun.visible = armed && !driving;
       flash.visible = shotTime > 0;
@@ -4056,6 +4095,9 @@ export function createGame(
   scene.userData.staticBatching = { before: staticCount, after: batches.size };
   frame = requestAnimationFrame(animate);
   return {
+    urban:(op,value='')=>{if(hp<=0||paused)return;life.hp=hp;const result=urbanAction(life,op,value,{at:nearby,riding:metroRiding});life.urban.notice=result;hp=life.hp;if(life.urban.travel>0){panel=null;clear();}if(op==='night'&&value==='walk')life.nav='home';if(op==='night'&&value==='friend'){friendStayRequested=true;open('friends');}say(result);save();lastHud=0;},
+    setDuel:(id)=>{duelTarget=id;},
+    loseDuel:()=>{life.cash=0;save();lastHud=0;say('야차 패배 · 보유 현금을 모두 잃었습니다.');},
     teleport: (p) => {
       if (hp <= 0 || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return;
       leaveHome();
@@ -4076,7 +4118,8 @@ export function createGame(
       player.rotation.set(0,p.heading,0);playerRig.pose(0,0,0);jumpVelocity=0;
       panel=null;clear();lastHud=0;
       camera.position.copy(player.position).add(new T.Vector3(8,9,12));
-      say(p.scene.startsWith('home:') ? '친구의 집 입구로 이동했습니다.' : '친구 옆으로 이동했습니다.');
+      if(friendStayRequested&&p.scene.startsWith('home:')){life.minutes+=120;life.urban.mental=Math.min(100,life.urban.mental+25);hp=Math.min(100,hp+20);life.hp=hp;friendStayRequested=false;save();say('친구 집에서 두 시간 쉬었습니다 · 멘탈 +25, HP +20');}
+      else say(friendStayRequested?'집 안에 있는 친구를 선택하면 함께 쉴 수 있습니다.':p.scene.startsWith('home:')?'친구의 집 입구로 이동했습니다.':'친구 옆으로 이동했습니다.');
     },
     presence: () => {
       const p = activePosition();
@@ -4091,10 +4134,11 @@ export function createGame(
         ),
         speed: speed * 3.6,
         mode: driving ? 'car' : riding ? 'bike' : 'walk',
-        y: player.position.y,
+        y: activePosition().y,
         train: metroRiding,
+        seated:metroRiding&&life.urban.seat!==null,worn:life.urban.worn,
         inside: life.inside,
-        scene: buildingFloor !== null ? 'office:' + buildingFloor : player.position.y>2 ? 'metro' : 'outdoors',
+        scene: life.inside ? 'outdoors' : currentScene(),
         hp,
         armed,
         weapon,

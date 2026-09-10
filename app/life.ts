@@ -1,3 +1,4 @@
+import {newUrban,restoreUrban,urbanCoffee,type Urban} from './urban';
 import { FEMALE_RESIDENT_IDS } from './social';
 import { BBQ_MENU } from './bbq';
 import { MCD_MENU } from './mcdonalds';
@@ -16,6 +17,8 @@ export const won = (n: number) => '₩ ' + Math.round(n).toLocaleString('ko-KR')
 export const clamp = (n: number, min = 0, max = 100) =>
   Math.min(max, Math.max(min, n));
 export const PLACES = [
+  {id:'aesop',name:'Aēsop · 이솝 향수',x:49,z:56,kind:'beauty',person:'향수 컨설턴트',color:'#d6c6a3'},
+  {id:'ader',name:'ADERERROR · 의류',x:-109,z:-77,kind:'beauty',person:'스타일 컨설턴트',color:'#657ee5'},
   {
     id: 'olive',
     name: '올리브영 성수점',
@@ -415,6 +418,7 @@ export const EVENT_TYPES = [
   },
 ] as const;
 export type Life = {
+  urban:Urban;
   contacts: number[];
   companionId: number | null;
   numberCooldowns: Record<string, number>;
@@ -484,6 +488,7 @@ export type Life = {
 };
 export function createLife(): Life {
   return {
+    urban:newUrban(),
     decor: defaultDecor(),
     cashDrops: [],
     dropSerial: 0,
@@ -833,6 +838,7 @@ export function act(
     s.hp = clamp(s.hp + item.hp);
     if (['canned', 'americano', 'specialty', 'mccoffee'].includes(id))
       s.caffeine = clamp(s.caffeine + 1, 0, 6);
+    if (['canned','americano','specialty','mccoffee'].includes(id)) urbanCoffee(s);
     if (id === 'specialty') s.focus = 90;
     return log(
       s,
@@ -899,8 +905,10 @@ export function act(
     );
   }
   if (action === 'sleep') {
+    if(s.urban.insomnia>0)return fail('카페인 불면 · 잠이 오지 않습니다.');
     if (s.wanted || s.pendingHeat)
       return fail('경찰 수색이 끝난 뒤 잠들 수 있습니다.');
+    s.urban.mental=100;
     advanceMinutes(s, 480);
     s.hp = 100;
     return log(s, '8시간 푹 잤습니다. 체력을 회복했습니다.');
@@ -1176,6 +1184,7 @@ export function restoreLife(raw: string | null): Life {
   if (!raw) return fresh;
   try {
     const data = JSON.parse(raw) as Life;
+    data.urban=restoreUrban(data.urban);
     data.decor ??= defaultDecor();
     data.cashDrops ??= [];
     data.dropSerial ??= 0;

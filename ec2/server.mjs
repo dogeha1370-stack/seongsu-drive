@@ -75,7 +75,9 @@ export function createGameServer({ root = fileURLToPath(new URL('../dist-ec2/cli
             rooms.leave(target); target.socket = null;
             if (targetSocket) { send(targetSocket,{type:'kicked',error:'관리자에 의해 퇴장되었습니다.'});targetSocket.close(4003,'Kicked'); }
           }
+          else if (['duel-invite','duel-accept','duel-decline'].includes(data.op)) rooms.challenge(p,data);
           else if (data.op === 'teleport') {
+            if(p.duel)rooms.fail('야차 중에는 이동할 수 없습니다.',409);
             const target = rooms.rooms.get(p.room)?.members.get(data.target);
             if (!target?.socket || target === p || p.hp <= 0 || target.hp <= 0) rooms.fail('이동할 친구를 찾을 수 없습니다.',404);
             send(ws,{type:'teleport',destination:{x:target.x,z:target.z,scene:target.scene,heading:target.heading,y:target.y||0,train:!!target.train}});

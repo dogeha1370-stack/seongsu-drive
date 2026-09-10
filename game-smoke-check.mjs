@@ -21,8 +21,8 @@ function load(file) {
     );
   if (file.endsWith('game.ts'))
     code = code.replace(
-      'return {\n        teleport:',
-      'return {\n        __test:{metro,people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;},bikeMotion,get buildingFloor(){return buildingFloor;}},\n        teleport:',
+      'return {\n        urban:',
+      'return {\n        __test:{get attackTime(){return attackTime;},metro,people,vehicles,abandonedBikes,playerBlocked,mouseDown,mouseMove,mouseUp,down,move,up,get life(){return life;},get camera(){return camera;},bikeMotion,get buildingFloor(){return buildingFloor;}},\n        urban:',
     );
   code = code.replace(
     /from ['"]([^'"]+)['"]/g,
@@ -644,6 +644,16 @@ assert(trafficCar.physics.x>waitingX+5,'green signal releases traffic');
 const {onRoad}=await import(load('app/traffic.ts'));assert(onRoad(trafficCar.physics.x,trafficCar.physics.z));
 Date.now=actualNow;
 console.log('PASS actual traffic braking for red, departure on green and road confinement');
+
+// Mobile attack goes through pointer-down separately while joystick input stays active.
+game.open(null);game.teleport({x:0,z:-64,scene:'outdoors',heading:0});settle();
+const movedFrom=player.position.clone();game.stick(.6,0);
+for(let i=0;i<20;i++)step(20);game.attack();
+assert(test.attackTime>0,'attack is accepted with movement input active');
+for(let i=0;i<20;i++)step(20);game.stick(0,0);assert(player.position.distanceTo(movedFrom)>.5,'attack does not cancel joystick movement');
+test.life.cash=123456;game.loseDuel();assert.equal(test.life.cash,0,'duel loss removes all cash');
+test.life.urban.worn='blue';settle();assert.equal(game.presence().worn,'blue');
+console.log('PASS concurrent joystick/action movement, duel cash loss and clothing presence');
 game.dispose();
 console.log(
   'PASS proximity dismissal/reentry, joystick movement, road-safe trees, one death/drop/collection, rider scooter, mouse/touch ADS firing, left-click punch, stopped-car ejection and entry, player damage numbers, NPC contacts/following, and remote avatars.',

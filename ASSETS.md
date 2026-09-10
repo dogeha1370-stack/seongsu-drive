@@ -64,3 +64,9 @@ PUBG의 모델이나 텍스처를 복사하지 않았습니다. 캐릭터를 화
 - Inventory category tabs and square item slots reference Nexon's guide: https://gi.maplestory.nexon.com/Guide/Basic/RebootWorld . Original CSS, no copied MapleStory graphics.
 - Food photos and license attribution: public/food/credits.html (also linked in the inventory). Source JPEGs unmodified.
 - Elevated four-track, twin-platform station references Seongsu station's structure and the user's viaduct photo. Original procedural model, compressed 3-car, 120-second in-map shuttle; not the real Line 2 route or timetable. Seoul transport station report: https://www.joongangbiz.com/images/psdlocation.pdf .
+
+## Urban life and fictional subway encounters
+- Aesop fragrance names: https://kr.aesop.com/kr/fragrance/fresh/tacit-eau-de-parfum/FR12.html and https://kr.aesop.com/kr/fragrance/ . Product effects and prices are game rules.
+- ADERERROR blue and oversized clothing silhouette: https://adererror.com/kr/shop/5752 . Original clothing colors, game prices.
+- Fictional nuisance encounters (noise, preaching, intoxication) reference Seoul public guidance: https://mediahub.seoul.go.kr/archives/1293912 . No real individual is represented. All models and drop props are procedural.
+- Line 2/Bundang are difficulty modes of the same compressed shuttle, not geographic railway reproductions. First/last service at 05:30/00:00 is a game rule, not a real timetable.

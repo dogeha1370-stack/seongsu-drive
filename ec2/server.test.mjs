@@ -88,6 +88,14 @@ test('EC2 HTTP, WebSocket rooms, combat, chat, reconnect and client transport', 
     assert.equal((await resumed.wait(m=>m.requestId==='unauthorized')).status,403);
     c.send({op:'admin',code:'wrong',requestId:'bad-admin'});
     assert.equal((await c.wait(m=>m.requestId==='bad-admin')).status,403);
+    await transport.duel('invite',bb.id);
+    await resumed.wait(m=>m.type==='snapshot'&&m.offer?.id===connected.id);
+    resumed.send({op:'duel-accept',requestId:'accept-duel'});
+    await resumed.wait(m=>m.type==='ack'&&m.requestId==='accept-duel');
+    for(let i=0;i<50&&!connection.duel;i++)await new Promise(r=>setTimeout(r,20));
+    assert.equal(connection.duel.target,bb.id,'real transport receives accepted duel');
+    await assert.rejects(transport.teleport(bb.id),/야차/);
+    game.rooms.endDuel(connected);
     await transport.admin('123123123');
     for(let i=0;i<50&&!connection.admin;i++)await new Promise(r=>setTimeout(r,20));
     assert.equal(connection.admin,true);

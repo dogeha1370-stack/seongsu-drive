@@ -4,11 +4,12 @@ import Image from 'next/image';
 import { connectGuests, type Connection } from './multiplayer';
 import type { Peer } from './multiplayer';
 import { WEAPONS } from './weapons';
-import { Users, Copy } from 'lucide-react';
+import { Swords, Crosshair, Hand, ArrowUp, Users, Copy } from 'lucide-react';
 import { BBQ_MENU, type BbqItem } from './bbq';
 import { MCD_MENU, type McdItem } from './mcdonalds';
 import { Joystick } from './joystick';
 import { residentName } from './social';
+import { UrbanPanel } from './urban-panel';
 import { Inventory as InventoryWindow } from './inventory';
 import { RoomChat } from './room-chat';
 import { BikeShowroom } from './bike-showroom';
@@ -147,12 +148,13 @@ export default function Page() {
       api.current = game;
       const guests = connectGuests(
         () => game.presence(),
-        setConnection,
+        c=>{setConnection(c);game.setDuel(c.duel?.target||null);},
         (peers) => { game.setPeers(peers); setMembers(peers); },
         (amount) => game.receiveDamage(amount),
         setMessages,
       );
       network.current = guests;
+      guests.onDuelLoss(()=>game.loseDuel());
       guests.onTeleport(p => game.teleport(p));
       game.onPeerAttack((id, kind) => guests.attack(id, kind));
       let preferred = '';
@@ -199,7 +201,7 @@ export default function Page() {
     night = Number(time.slice(0, 2)) < 6 || Number(time.slice(0, 2)) >= 19,
     event = s.event ? EVENT_TYPES[s.event.index] : null;
   const panelTitle =
-    h.panel === 'friends'
+    h.panel === 'urban' ? '성수 생활 · 지하철' : h.panel === 'friends'
       ? '친구와 성수에서'
       : h.panel === 'phone'
         ? '내 손안의 성수'
@@ -482,7 +484,9 @@ export default function Page() {
             <MapPin size={21} />
             <span>소식</span>
           </TabsTrigger>
+          <TabsTrigger value="urban"><Heart size={18}/><span>생활</span></TabsTrigger>
         </TabsList>
+        <TabsContent value="urban"><UrbanPanel s={s} run={(op,v)=>api.current?.urban(op,v)}/></TabsContent>
         <TabsContent value="delivery">
           <div className="delivery-summary">
             <div>
@@ -825,6 +829,7 @@ export default function Page() {
           <p>동네 호감 {s.relations[at.id] || 0}</p>
           <button onClick={() => action('talk')}>이야기 나누기</button>
         </div>
+        {(at.id==='aesop'||at.id==='ader')&&<UrbanPanel s={s} at={at.id} run={(op,v)=>api.current?.urban(op,v)}/>}
         {at.kind === 'cafe' && shop(['americano', 'specialty'])}
         {at.kind === 'store' && shop(['snack', 'meal', 'canned'])}
         {at.kind === 'bar' && shop(['meal'])}
@@ -1301,8 +1306,8 @@ export default function Page() {
               : wantedLabels[s.wanted]}
           </span>
           <b>
-            {'●'.repeat(s.wanted)}
-            {'○'.repeat(5 - s.wanted)}
+            {'★'.repeat(s.wanted)}
+            {'☆'.repeat(5 - s.wanted)}
           </b>
         </div>
         {s.wanted > 0 && (
@@ -1337,7 +1342,7 @@ export default function Page() {
           <b>{Math.round(h.hp)}</b>
           <progress max="100" value={h.hp} aria-label="체력" />
         </div>
-        {s.caffeine >= 3 && <p className="danger">카페인 과다 · 손떨림</p>}
+        <progress max={100} value={s.urban.mental} aria-label="멘탈" title={'멘탈 '+Math.round(s.urban.mental)}/>{s.caffeine >= 3 && <p className="danger">카페인 과다 · 손떨림</p>}
       </section>
       </div>
       {h.social && !h.paused && (!h.panel || h.panel === 'place') && (
@@ -1377,7 +1382,7 @@ export default function Page() {
           </button>
         </aside>
       )}
-      {h.metro && <aside className="metro-hud"><TrainFront size={22}/><b>② 성수역</b><span>{h.metro.riding ? '열차 탑승 중' : '승강장'} · {h.metro.doors ? '문 열림' : '운행 중'}</span><button disabled={!h.metro.canUse} onClick={()=>api.current?.interact()}>{h.metro.riding ? '내리기' : '열차 타기'} · E</button></aside>}
+      {h.metro && <aside className="metro-hud"><TrainFront size={22}/><b>② 성수역</b><span>{h.metro.riding ? '열차 탑승 중' : '승강장'} · {h.metro.doors ? '문 열림' : '운행 중'}</span><button disabled={!h.metro.canUse} onClick={()=>api.current?.interact()}>{h.metro.riding ? '내리기' : '열차 타기'} · E</button><button onClick={()=>open('urban')}>{s.urban.villain!==null?'빌런 등장!':'좌석 · 상황'}</button></aside>}
       {h.building && (
         <aside className="elevator-hud">
           <b>서울숲 빌딩 · {h.building.floor}F</b>
@@ -1400,6 +1405,9 @@ export default function Page() {
             )}
         </aside>
       )}
+      {s.urban.travel>0&&<aside className="travel-status">택시 이동 중 · {Math.ceil(s.urban.travel)}초<br/>{s.urban.notice}</aside>}
+      {connection.offer && <aside className="duel-offer"><b>{connection.offer.name} 님의 야차 신청</b><p>수락하면 3초 후 대결 시작 · 3분 제한. 상대에게 죽으면 보유 현금 전액 손실. 대결 상대 공격은 경찰 추적 면제.</p><button onClick={()=>void network.current?.duel('accept').catch(e=>setCopyNotice(e.message))}>수락</button><button onClick={()=>void network.current?.duel('decline')}>거절</button></aside>}
+      {connection.duel && <div className="duel-status">⚔ {connection.duel.name} 님과 야차 중 · 전 재산 위험</div>}
       <output className="context-hint">{h.hint}</output>
       {h.hurt && <div className="hurt" />}
       {h.armed && !h.ads && (!h.panel || h.panel === 'place') && (
@@ -1512,12 +1520,15 @@ export default function Page() {
         disabled={h.paused || (!!h.panel && h.panel !== 'place') || h.hp <= 0}
         onMove={(x, y) => api.current?.stick(x, y)}
       />
-      <div className="touch-actions">
-        <button onClick={() => api.current?.interact()}>E</button>
-        <button onClick={() => api.current?.jump()}>점프</button>
-        <button onClick={() => api.current?.attack()}>
-          {h.armed ? '발사' : '공격'}
-        </button>
+      <div className="touch-actions" aria-label="터치 조작">
+        {[
+          {id:'interact',label:'상호작용',Icon:Hand},
+          {id:'equip',label:'총 꺼내기',Icon:Crosshair},
+          {id:'jump',label:'점프',Icon:ArrowUp},
+          {id:'attack',label:'공격',Icon:Swords},
+          {id:'aim',label:'조준',Icon:Crosshair},
+          {id:'ride',label:'타기 내리기',Icon:Bike},
+        ].map(({id,label,Icon})=><button key={id} className={'thumb-'+id} aria-label={label} onPointerDown={e=>{e.preventDefault();e.stopPropagation();const g=api.current;if(id==='interact')g?.interact();else if(id==='equip')g?.equip();else if(id==='jump')g?.jump();else if(id==='attack')g?.attack();else if(id==='aim')g?.aim();else g?.mount();}}><Icon size={23}/></button>)}
       </div>
       {h.panel === 'place' && at && (
         <aside
@@ -1643,6 +1654,7 @@ export default function Page() {
                   {members.map(p => <div className="member-row" key={p.id}>
                     <div><b>{p.name}</b><small>{p.scene.startsWith('home:') ? '집 안' : p.scene.startsWith('office:') ? '빌딩 ' + p.scene.split(':')[1] + '층' : '거리'}{p.companion ? ' · 동행 중' : ''}</small></div>
                     <button onClick={async()=>{try{await network.current?.teleport(p.id);}catch(e){setCopyNotice(e instanceof Error?e.message:'이동하지 못했습니다.');}}}>친구에게 이동</button>
+                    <button disabled={!!connection.duel} onClick={async()=>{try{await network.current?.duel('invite',p.id);setCopyNotice('야차 신청을 보냈습니다. 수락 후 패배하면 전 재산을 잃습니다.');}catch(e){setCopyNotice(e instanceof Error?e.message:'신청 실패');}}}>야차 신청</button>
                     {connection.admin && <button className="kick-button" onClick={async()=>{try{await network.current?.kick(p.id);setCopyNotice(p.name+' 님을 추방했습니다.');}catch(e){setCopyNotice(e instanceof Error?e.message:'추방하지 못했습니다.');}}}>추방</button>}
                   </div>)}
                 </div>
@@ -1755,6 +1767,7 @@ export default function Page() {
                 </p>
               </div>
             )}
+            {h.panel === 'urban' && <UrbanPanel s={s} metro={!!h.metro?.riding} run={(op,v)=>api.current?.urban(op,v)}/>}
             {h.panel === 'phone' && phonePanel()}
             {h.panel === 'home' && homePanel()}
             {h.panel === 'bag' && <InventoryWindow life={s} action={action} />}

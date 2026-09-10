@@ -1,6 +1,7 @@
 import { connectSocketGuests } from './multiplayer-socket';
 export type Companion = { id: number; x: number; z: number; heading: number };
 export type Peer = {
+  seated?:boolean;worn?:string;
   y?:number;
   companion?: Companion | null;
   weapon?: number;
@@ -24,6 +25,7 @@ export type ChatMessage = {
   at: number;
 };
 export type PresenceState = {
+  seated?:boolean;worn?:string;
   train?:boolean;
   y?:number;
   companion?: Companion | null;
@@ -40,6 +42,8 @@ export type PresenceState = {
   emote: string;
 };
 export type Connection = {
+  duel?:{target:string;name:string;expires:number}|null;
+  offer?:{id:string;name:string;expires:number}|null;
   admin?: boolean;
   status: 'offline' | 'joining' | 'online' | 'reconnecting';
   name: string;
@@ -212,6 +216,8 @@ export function connectGuests(
   }
   return {
     join,
+    onDuelLoss: (_callback:()=>void)=>{},
+    duel: async (_op:string,_target?:string)=>{throw new Error('EC2 전용 기능입니다.');},
     onTeleport: (_callback: (p: {x:number;z:number;scene:string;heading:number;y?:number;train?:boolean}) => void) => {},
     teleport: async (_target: string) => { throw new Error('EC2 서버에서 사용할 수 있습니다.'); },
     admin: async (_code: string) => { throw new Error('EC2 서버에서 사용할 수 있습니다.'); },

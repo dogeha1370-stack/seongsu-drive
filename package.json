@@ -13,7 +13,7 @@
     "format": "oxfmt",
     "build:ec2": "vite build --config vite.ec2.config.ts",
     "start:ec2": "node ec2/server.mjs",
-    "test:ec2": "node --test ec2/server.test.mjs",
+    "test:ec2": "node --test ec2/server.test.mjs ec2/duel.test.mjs",
     "package:ec2": "node deploy/package-ec2.mjs"
   },
   "dependencies": {

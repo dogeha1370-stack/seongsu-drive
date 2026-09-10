@@ -63,6 +63,7 @@ export function Joystick({
       onPointerDown={(e) => {
         if (disabled || active.current !== null) return;
         e.preventDefault();
+        e.stopPropagation();
         active.current = e.pointerId;
         const rect = e.currentTarget.getBoundingClientRect();
         center.current = {
@@ -102,7 +103,7 @@ export function Joystick({
           }}
         />
       </div>
-      <span className="joystick-label">드래그하여 이동</span>
+
     </div>
   );
 }
